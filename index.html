@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Punt Tracker</title>
+  <meta name="description" content="Punt & pro play tracker voor live poker.">
+  <meta name="theme-color" content="#0d0f11">
+  <meta name="color-scheme" content="dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Punts">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="view"></main>
+
+  <nav class="tabbar" aria-label="Hoofdmenu">
+    <a href="#/" data-tab="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.2 12 4l8 7.2V20h-5.5v-5.5h-5V20H4z"/></svg>
+      <span>Home</span>
+    </a>
+    <a href="#/overzicht" data-tab="overzicht">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7M12 20V5M19 20v-10"/></svg>
+      <span>Overzicht</span>
+    </a>
+    <a href="#/log" data-tab="log">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 6.5H20M8.5 12H20M8.5 17.5H20M4.2 6.5h.1M4.2 12h.1M4.2 17.5h.1"/></svg>
+      <span>Log</span>
+    </a>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <input id="import-file" type="file" accept="application/json,.json" hidden>
+
+  <noscript><p class="noscript">Deze app heeft JavaScript nodig.</p></noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
