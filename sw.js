@@ -1,6 +1,6 @@
 // Service worker: de hele app staat in de cache en werkt dus offline.
 // Verhoog VERSION bij een release om oude caches op te ruimen.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `punt-tracker-${VERSION}`;
 const ASSETS = [
   './',
@@ -8,6 +8,8 @@ const ASSETS = [
   './style.css',
   './js/app.js',
   './js/core.js',
+  './js/fx.js',
+  './fonts/space-grotesk.woff2',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',

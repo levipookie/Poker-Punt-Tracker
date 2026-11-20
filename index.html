@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Punt Tracker</title>
   <meta name="description" content="Punt & pro play tracker voor live poker.">
-  <meta name="theme-color" content="#0d0f11">
+  <meta name="theme-color" content="#07080c">
   <meta name="color-scheme" content="dark">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,12 +15,15 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preload" href="fonts/space-grotesk.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div class="aura" aria-hidden="true"><i class="v"></i><i class="r"></i><i class="g"></i></div>
   <main id="view"></main>
 
   <nav class="tabbar" aria-label="Hoofdmenu">
+    <i class="ind" aria-hidden="true"></i>
     <a href="#/" data-tab="home">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.2 12 4l8 7.2V20h-5.5v-5.5h-5V20H4z"/></svg>
       <span>Home</span>

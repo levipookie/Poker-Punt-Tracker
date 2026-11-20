@@ -1,4 +1,5 @@
 import * as C from './core.js';
+import * as FX from './fx.js';
 
 const STORE_KEY = 'ppt.v1';
 const view = document.getElementById('view');
@@ -9,7 +10,11 @@ let entries = loadEntries();
 let draft = null; // het formulier dat open staat
 let cameFromApp = false; // true als het formulier via een tik in de app is geopend
 let logScroll = 0;
-const ov = { mode: 'week', offset: 0, bar: null };
+const ov = { mode: 'week', offset: 0, bar: null, from: 0 };
+const MODES = ['week', 'maand', 'alles'];
+const TABS = ['home', 'overzicht', 'log'];
+const shown = new Map(); // laatst getoonde waarde per teller, voor het oplopen
+let pendingFx = null; // entry die net is gelogd en nog gevierd moet worden
 
 /* ---------- opslag ---------- */
 
@@ -94,8 +99,13 @@ function onRoute() {
     draft = { ...e, mode: 'edit', when: toLocalInput(e.ts) };
     if (e.type === 'punt') draft.custom = C.QUICK_AMOUNTS.includes(e.cents) ? '' : plainAmount(e.cents);
   }
-  render();
+  const fx = r.name === 'home' ? pendingFx : null;
+  pendingFx = null;
+  // Tellers lopen opnieuw op bij een nieuw scherm, maar niet na een formulier: dan telt het cijfer door.
+  if (!fx && !draft) shown.clear();
+  render(true);
   window.scrollTo(0, r.name === 'log' ? logScroll : 0);
+  if (fx) celebrate(fx);
 }
 
 function closeForm(fallback = '#/') {
@@ -107,55 +117,123 @@ function closeForm(fallback = '#/') {
   }
 }
 
-function render() {
+function render(animate = false) {
   const r = route();
   document.body.classList.toggle('is-form', Boolean(draft));
-  for (const a of document.querySelectorAll('.tabbar a')) {
+  document.body.dataset.tone = draft ? draft.type : '';
+  const nav = document.querySelector('.tabbar');
+  if (TABS.includes(r.name)) nav.style.setProperty('--i', TABS.indexOf(r.name));
+  for (const a of nav.querySelectorAll('a')) {
     if (a.dataset.tab === r.name) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   }
+  view.classList.toggle('animate', animate && FX.motionOk());
   if (draft) view.innerHTML = draft.type === 'punt' ? puntForm() : proForm();
   else if (r.name === 'overzicht') view.innerHTML = overviewView();
   else if (r.name === 'log') view.innerHTML = logView();
   else view.innerHTML = homeView();
   const note = view.querySelector('textarea');
   if (note) autoGrow(note);
+  afterRender();
+}
+
+// Sfeer en beweging na elke render: achtergrondgloed, oplopende cijfers, schuivende keuzeknop.
+function afterRender() {
+  const week = C.summarize(entries.filter((e) => C.inRange(e, C.periodRange('week', 0, Date.now()))));
+  const root = document.documentElement.style;
+  root.setProperty('--heat', Math.min(week.lost / 50000, 1).toFixed(3));
+  root.setProperty('--cool', Math.min(week.pros / 4, 1).toFixed(3));
+
+  for (const el of view.querySelectorAll('[data-count]')) {
+    const to = Number(el.dataset.count);
+    const from = shown.has(el.dataset.key) ? shown.get(el.dataset.key) : 0;
+    shown.set(el.dataset.key, to);
+    FX.countTo(el, from, to, money);
+  }
+  const seg = view.querySelector('.seg');
+  if (seg) requestAnimationFrame(() => seg.style.setProperty('--i', seg.dataset.i));
+}
+
+// Na het loggen: vonken en een zwevend label bij het cijfer dat verandert.
+function celebrate(entry) {
+  const hero = view.querySelector('.hero');
+  if (!hero) return;
+  if (entry.type === 'punt') {
+    const box = hero.querySelector('.amount').getBoundingClientRect();
+    FX.floatLabel(`+${money(entry.cents)}`, Math.min(box.right + 10, window.innerWidth - 110), box.top + 4, 'punt');
+    FX.burst(box.left + box.width / 2, box.bottom - 8, { tone: 'punt', dir: 'down', count: 28, spread: box.width });
+    FX.pulse(hero, 'hit-punt');
+    FX.buzz(40);
+  } else {
+    const box = hero.querySelector('.counts li:last-child').getBoundingClientRect();
+    FX.floatLabel('+1 pro play', Math.min(box.right + 12, window.innerWidth - 130), box.top + 5, 'pro');
+    FX.burst(box.left + 14, box.top + box.height / 2, { tone: 'pro', count: 44 });
+    FX.pulse(hero, 'hit-pro');
+    FX.buzz([15, 50, 15]);
+  }
 }
 
 /* ---------- home ---------- */
 
+function weekStrip(now) {
+  const today = C.sessionDay(now);
+  const start = C.weekStart(today);
+  const cells = ['M', 'D', 'W', 'D', 'V', 'Z', 'Z'].map((letter, i) => {
+    const day = C.addDays(start, i);
+    const key = C.dayKey(day);
+    const list = entries.filter((e) => C.dayKey(C.sessionDay(e.ts)) === key);
+    const punts = list.filter((e) => e.type === 'punt').length;
+    const dots = '<i class="punt"></i>'.repeat(Math.min(punts, 3)) + '<i class="pro"></i>'.repeat(Math.min(list.length - punts, 3));
+    const state = key === C.dayKey(today) ? ' class="today"' : day > today ? ' class="future"' : '';
+    return `<li${state}><span class="cell">${dots}</span><span class="d">${letter}</span></li>`;
+  });
+  return `<ol class="weekstrip" aria-hidden="true">${cells.join('')}</ol>`;
+}
+
+// Het logo: een ring die de verhouding punts / pro plays van deze week laat zien.
+function ring(punts, pros) {
+  const total = punts + pros;
+  const share = total ? Math.round((punts / total) * 100) : 50;
+  return `
+    <svg class="ring${total ? '' : ' idle'}" viewBox="0 0 36 36" aria-hidden="true">
+      <circle class="pro" cx="18" cy="18" r="15.9155"/>
+      <circle class="punt" cx="18" cy="18" r="15.9155" stroke-dasharray="${share} ${100 - share}"/>
+    </svg>`;
+}
+
 function homeView() {
   const now = Date.now();
-  const card = (title, mode) => {
-    const range = C.periodRange(mode, 0, now);
-    const s = C.summarize(entries.filter((e) => C.inRange(e, range)));
-    return `
-      <section class="card stat">
+  const sum = (mode) => C.summarize(entries.filter((e) => C.inRange(e, C.periodRange(mode, 0, now))));
+  const week = sum('week');
+  const card = (title, s, cls, key, extra = '') => `
+      <section class="card stat ${cls}">
         <h2>${title}</h2>
-        <p class="amount${s.lost ? ' is-punt' : ''}">${money(s.lost)}</p>
+        <p class="amount${s.lost ? ' is-punt' : ''}" data-count="${s.lost}" data-key="${key}">${money(s.lost)}</p>
         <p class="sub">verloren aan punts</p>
         <ul class="counts">
           <li><span class="dot punt"></span>${plural(s.punts, 'punt', 'punts')}</li>
           <li><span class="dot pro"></span>${plural(s.pros, 'pro play', 'pro plays')}</li>
         </ul>
+        ${extra}
       </section>`;
-  };
   return `
     <div class="home">
       <header class="top">
-        <h1>Punt Tracker</h1>
-        <p>${dayLabel(C.sessionDay(now))}</p>
+        <h1>${ring(week.punts, week.pros)}<span><b>Punt</b> Tracker</span></h1>
+        <p class="pill">${dayLabel(C.sessionDay(now))}</p>
       </header>
       <div class="stats">
-        ${card('Deze week', 'week')}
-        ${card('Deze maand', 'maand')}
+        ${card('Deze week', week, 'hero', 'home-week', weekStrip(now))}
+        ${card('Deze maand', sum('maand'), 'month', 'home-month')}
       </div>
       <div class="actions">
         <a class="big punt" href="#/punt" data-nav>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5 10 14l3.5-3.5 7 7M20.5 12.5v5h-5"/></svg>
           <strong>Punt</strong>
           <span>Slechte play</span>
         </a>
         <a class="big pro" href="#/pro" data-nav>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.2 6.3 6.3 2.2-6.3 2.2-2.2 6.3-2.2-6.3L3.5 12l6.3-2.2z"/></svg>
           <strong>Pro play</strong>
           <span>Sterke +EV play</span>
         </a>
@@ -286,6 +364,7 @@ function addEntry(fields) {
     return;
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  pendingFx = entry;
   closeForm('#/');
   toast(`${entry.type === 'punt' ? 'Punt' : 'Pro play'} gelogd: ${describe(entry)}`, {
     label: 'Ongedaan maken',
@@ -384,8 +463,8 @@ function overviewView() {
 
   const maxReason = s.byReason.length ? s.byReason[0].cents : 1;
   const reasons = s.byReason.length
-    ? `<ul class="reasons">${s.byReason.map((r) => `
-        <li>
+    ? `<ul class="reasons">${s.byReason.map((r, i) => `
+        <li style="--i:${i}">
           <div class="row-line">
             <span>${C.labelOf(C.REASONS, r.reason)} <small>${r.count}×</small></span>
             <span class="num">${money(r.cents)} <small>${Math.round((r.cents / s.lost) * 100)}%</small></span>
@@ -408,7 +487,7 @@ function overviewView() {
 
   return `
     <header class="top"><h1>Overzicht</h1></header>
-    <div class="seg" role="group" aria-label="Periode">${seg}</div>
+    <div class="seg" role="group" aria-label="Periode" style="--i:${ov.from}" data-i="${MODES.indexOf(ov.mode)}">${seg}</div>
     <div class="period">
       <button type="button" data-act="prev" aria-label="Vorige periode"${canPrev ? '' : ' disabled'}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 8 12l6.5 7"/></svg>
@@ -421,7 +500,7 @@ function overviewView() {
 
     <section class="card stat hero">
       <h2>Totaal verloren</h2>
-      <p class="amount${s.lost ? ' is-punt' : ''}">${money(s.lost)}</p>
+      <p class="amount${s.lost ? ' is-punt' : ''}" data-count="${s.lost}" data-key="ov-total">${money(s.lost)}</p>
     </section>
     <div class="tiles">
       <div class="card tile"><h2>Punts</h2><p>${s.punts}</p></div>
@@ -460,7 +539,7 @@ function weekChart(range, now) {
     const h = max ? Math.max((w.lost / max) * 100, w.lost ? 3 : 0) : 0;
     const label = `${weekTitle(w.start)}: ${money(w.lost)}, ${plural(w.punts, 'punt', 'punts')}`;
     return `
-      <button type="button" class="col${inPeriod ? '' : ' dim'}" data-act="bar" data-val="${i}"
+      <button type="button" class="col${inPeriod ? '' : ' dim'}" style="--i:${i}" data-act="bar" data-val="${i}"
         aria-pressed="${i === sel}" aria-label="${label}">
         <span class="val">${i === sel ? money(w.lost) : ''}</span>
         <span class="track"><span class="bar" style="height:${h}%"></span></span>
@@ -574,8 +653,12 @@ function toast(message, action) {
   clearTimeout(toastTimer);
   toastRun = action ? action.run : null;
   toastEl.innerHTML = `<span>${esc(message)}</span>${action ? `<button type="button" data-act="toast-action">${esc(action.label)}</button>` : ''}`;
+  const ms = action ? 8000 : 3000;
+  toastEl.style.setProperty('--ms', `${ms}ms`);
+  toastEl.hidden = true;
+  void toastEl.offsetWidth; // herstart de animatie als er al een toast stond
   toastEl.hidden = false;
-  toastTimer = setTimeout(hideToast, action ? 8000 : 3000);
+  toastTimer = setTimeout(hideToast, ms);
 }
 
 function hideToast() {
@@ -610,22 +693,24 @@ const actions = {
   save: saveForm,
   delete: deleteDraft,
   mode: (el) => {
-    Object.assign(ov, { mode: el.dataset.val, offset: 0, bar: null });
-    render();
+    Object.assign(ov, { from: MODES.indexOf(ov.mode), mode: el.dataset.val, offset: 0, bar: null });
+    render(true);
+    ov.from = MODES.indexOf(ov.mode);
   },
   prev: () => {
     ov.offset -= 1;
     ov.bar = null;
-    render();
+    render(true);
   },
   next: () => {
     ov.offset = Math.min(ov.offset + 1, 0);
     ov.bar = null;
-    render();
+    render(true);
   },
   bar: (el) => {
     ov.bar = Number(el.dataset.val);
     render();
+    FX.buzz(8);
   },
   export: exportData,
   import: () => importInput.click(),

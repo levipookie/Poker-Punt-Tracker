@@ -28,9 +28,11 @@ Open de app daarna één keer met internet aan. Vanaf dat moment werkt hij ook z
 
 | Bestand | Wat erin staat |
 | --- | --- |
-| `index.html`, `style.css` | Pagina en vormgeving |
+| `index.html`, `style.css` | Pagina, vormgeving en animaties |
 | `js/core.js` | Rekenlogica: sessiedag, weken, totalen, import |
 | `js/app.js` | Schermen, formulieren en opslag |
+| `js/fx.js` | Effecten: vonken, oplopende cijfers, trillen |
+| `fonts/` | Lettertype Space Grotesk (SIL Open Font License, zie `fonts/OFL.txt`) |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline werking en installatie |
 
 Lokaal draaien kan met elke statische server, bijvoorbeeld `python3 -m http.server` in deze map, en dan `http://localhost:8000` openen.
