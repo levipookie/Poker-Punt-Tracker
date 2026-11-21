@@ -157,7 +157,7 @@ export function parseAmount(input) {
   return cents > 0 && cents < 1e11 ? cents : null;
 }
 
-function cleanEntry(raw) {
+export function cleanEntry(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const time = new Date(raw.ts);
   if (typeof raw.id !== 'string' || !raw.id || Number.isNaN(time.getTime())) return null;

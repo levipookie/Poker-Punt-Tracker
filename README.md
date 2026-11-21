@@ -44,6 +44,20 @@ Goede mental-game-beslissingen leveren XP op. Rechtsboven op het startscherm sta
 
 Alles wordt uit je log berekend. Een entry bewerken, verwijderen of importeren past je XP dus vanzelf aan.
 
+## Accounts (Supabase)
+
+Met een account staat je log ook online en blijft het gelijk op al je toestellen. Zonder account werkt de app precies hetzelfde, alleen op dat ene toestel. Inloggen gaat met e-mail en wachtwoord; inloglinks en Google openen op iPhone Safari in plaats van de app op je beginscherm.
+
+De app is local-first: alles wordt eerst op het toestel opgeslagen en op de achtergrond gesynchroniseerd, dus aan tafel zonder bereik werkt alles gewoon. Bij twee wijzigingen van dezelfde entry wint de laatste. Uitloggen haalt het log van dat toestel; het blijft in je account.
+
+**Eenmalig instellen in Supabase**
+
+1. **SQL Editor** → plak de hele inhoud van `supabase/migrations/20261121000000_accounts.sql` → **Run**. Dit maakt de tabellen en de regels die zorgen dat iedereen alleen zijn eigen data ziet.
+2. **Authentication → Sign In / Providers → Email**: zet **Confirm email** uit. De ingebouwde e-mail van Supabase stuurt alleen naar leden van je eigen Supabase-team, dus vrienden zouden de bevestigingsmail nooit krijgen.
+3. **Project Settings → API Keys**: kopieer de **Project URL** en de **publishable key** naar `js/config.js`. Beide zijn openbaar: ze staan in elke browser die de app laadt. Gebruik nooit de secret key of de service role key.
+
+Wachtwoord vergeten werkt pas als je in Supabase een eigen e-mailprovider instelt (Authentication → Emails → SMTP).
+
 ## Goed om te weten
 
 - **Je data staat alleen op dat ene toestel.** Op iPhone heeft de app op het beginscherm een eigen opslag, los van Safari. Installeer dus eerst en begin dan pas met loggen.
@@ -59,6 +73,8 @@ Alles wordt uit je log berekend. Een entry bewerken, verwijderen of importeren p
 | `js/core.js` | Rekenlogica: sessiedag, weken, totalen, import, sessies en tiltmeter |
 | `js/app.js` | Schermen, formulieren en opslag |
 | `js/fx.js` | Effecten: vonken, oplopende cijfers, trillen |
+| `js/cloud.js`, `js/config.js` | Accounts en synchronisatie met Supabase |
+| `supabase/migrations/` | Database-opzet voor Supabase |
 | `fonts/` | Lettertype Space Grotesk (SIL Open Font License, zie `fonts/OFL.txt`) |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline werking en installatie |
 

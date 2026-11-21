@@ -1,5 +1,6 @@
 import * as C from './core.js';
 import * as FX from './fx.js';
+import * as Cloud from './cloud.js';
 
 const STORE_KEY = 'ppt.v1';
 const SEEN_KEY = 'ppt.seen';
@@ -24,6 +25,7 @@ let pendingFx = null; // entry die net is gelogd en nog gevierd moet worden
 let lastAdded = null; // { id, at } van de laatst gelogde entry, als oorzaak van een stopadvies
 let alarm = null; // het schermvullende advies dat open staat: { kind, rank, until }
 let cheer = null; // nieuw level dat nog gevierd moet worden, zodra er geen advies open staat
+const acc = { mode: 'in', busy: false, error: '', notice: '', confirm: null }; // het accountscherm
 
 /* ---------- opslag ---------- */
 
@@ -40,7 +42,7 @@ function load() {
   return { entries: [], settings: { ...C.DEFAULT_SETTINGS } };
 }
 
-function persist() {
+function saveLocal() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({ version: 1, entries, settings }));
     return true;
@@ -49,6 +51,27 @@ function persist() {
     return false;
   }
 }
+
+// Opslaan op dit toestel, en als je bent ingelogd kort daarna synchroniseren.
+function persist() {
+  if (!saveLocal()) return false;
+  Cloud.noteSettings(settings);
+  Cloud.schedule();
+  return true;
+}
+
+Cloud.attach({
+  get: () => ({ entries, settings }),
+  set: (nextEntries, nextSettings) => {
+    entries = nextEntries;
+    settings = nextSettings;
+    saveLocal();
+  },
+  // Er kwam iets binnen van een ander toestel: opnieuw tekenen, maar nooit midden in een formulier.
+  changed: () => {
+    if (!draft && !['rules', 'account'].includes(route().name)) render();
+  },
+});
 
 function newId() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -122,7 +145,7 @@ const NAMES = { punt: 'Punt', pro: 'Pro play', klap: 'Hit' };
 
 function route() {
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
-  if (['punt', 'pro', 'hit', 'rules', 'progress', 'overview', 'log'].includes(name)) return { name };
+  if (['punt', 'pro', 'hit', 'rules', 'progress', 'account', 'overview', 'log'].includes(name)) return { name };
   if (name === 'edit') return { name, id: decodeURIComponent(arg || '') };
   return { name: 'home' };
 }
@@ -130,6 +153,7 @@ function route() {
 function onRoute() {
   const r = route();
   draft = null;
+  if (r.name !== 'account') Object.assign(acc, { confirm: null, error: '', notice: '' });
   if (r.name === 'punt') {
     draft = { mode: 'new', type: 'punt', cents: null, custom: '', reason: null, note: '' };
   } else if (r.name === 'pro') {
@@ -172,7 +196,7 @@ function closeForm(fallback = '#/') {
 
 function render(animate = false) {
   const r = route();
-  const full = Boolean(draft) || r.name === 'rules' || r.name === 'progress';
+  const full = Boolean(draft) || ['rules', 'progress', 'account'].includes(r.name);
   document.body.classList.toggle('is-form', full);
   document.body.dataset.tone = draft ? draft.type : '';
   const nav = document.querySelector('.tabbar');
@@ -184,6 +208,7 @@ function render(animate = false) {
   view.classList.toggle('animate', animate && FX.motionOk());
   if (draft) view.innerHTML = formFor(draft.type);
   else if (r.name === 'rules') view.innerHTML = rulesView();
+  else if (r.name === 'account') view.innerHTML = accountView();
   else if (r.name === 'progress') view.innerHTML = progressView();
   else if (r.name === 'overview') view.innerHTML = overviewView();
   else if (r.name === 'log') view.innerHTML = logView();
@@ -629,6 +654,194 @@ function progressView() {
     </div>`;
 }
 
+/* ---------- account ---------- */
+
+function ago(ms) {
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `on ${fmtShort.format(new Date(ms))}`;
+}
+
+function syncLine() {
+  if (!Cloud.ready()) return '';
+  const waiting = Cloud.pending(entries);
+  if (Cloud.status.syncing) return 'Syncing…';
+  if (Cloud.status.error) {
+    if (Cloud.status.error.code === 'offline') return waiting ? `Offline · ${plural(waiting, 'change', 'changes')} waiting` : 'Offline';
+    return `Sync failed: ${Cloud.status.error.message}`;
+  }
+  if (waiting) return `${plural(waiting, 'change', 'changes')} waiting to sync`;
+  return Cloud.lastSync() ? `Synced ${ago(Cloud.lastSync())}` : 'Not synced yet';
+}
+
+function accountBlock() {
+  if (!Cloud.enabled) return '';
+  const u = Cloud.user();
+  if (u && Cloud.ready()) {
+    return `
+    <section class="block account">
+      <h2>Account</h2>
+      <a class="card acct" href="#/account" data-nav>
+        <span class="who"><b>${esc(u.email)}</b><small data-sync>${syncLine()}</small></span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7"/></svg>
+      </a>
+    </section>`;
+  }
+  return `
+    <section class="block account">
+      <h2>Account</h2>
+      <p class="hint">${Cloud.status.expired ? 'Your session expired. Sign in again to keep syncing.' : 'Sign in to keep your log safe and in sync on all your devices.'}</p>
+      <a class="btn plain" href="#/account" data-nav>Sign in or create account</a>
+    </section>`;
+}
+
+function accountView() {
+  if (!Cloud.enabled) {
+    return `${formHead('Account')}
+      <div class="form"><p class="hint lead">Accounts aren't set up for this app yet.</p></div>`;
+  }
+  const u = Cloud.user();
+  // Net ingelogd op een toestel met een log zonder account.
+  if (u && Cloud.needsClaim(entries.length)) {
+    return `${formHead('Account')}
+      <div class="form">
+        <section class="card acct-card">
+          <p class="eyebrow">Signed in as</p>
+          <p class="mail">${esc(u.email)}</p>
+        </section>
+        <p class="hint lead">This phone already has <b>${plural(entries.length, 'entry', 'entries')}</b> that aren't in an account. Add them to ${esc(u.email)}? Anything already in the account stays too.</p>
+        <button type="button" class="btn pro" data-act="acc-claim">Add them to my account</button>
+        <button type="button" class="btn ghost" data-act="acc-cancel">Cancel and sign out</button>
+      </div>`;
+  }
+  if (u && Cloud.ready()) {
+    const c = acc.confirm;
+    const waiting = Cloud.pending(entries);
+    return `${formHead('Account')}
+      <div class="form">
+        <section class="card acct-card">
+          <p class="eyebrow">Signed in as</p>
+          <p class="mail">${esc(u.email)}</p>
+          <p class="sub" data-sync>${syncLine()}</p>
+        </section>
+        <p class="hint lead">Your log is saved on this phone first and synced in the background, so the app keeps working at the table without a connection.</p>
+        ${acc.notice ? `<p class="notice">${esc(acc.notice)}</p>` : ''}
+        ${acc.error ? `<p class="error">${esc(acc.error)}</p>` : ''}
+        <button type="button" class="btn plain" data-act="acc-sync"${Cloud.status.syncing ? ' disabled' : ''}>Sync now</button>
+        <button type="button" class="btn plain${c === 'signout' ? ' danger' : ''}" data-act="acc-signout"${acc.busy ? ' disabled' : ''}>${c === 'signout' ? `Sign out and lose ${plural(waiting, 'unsynced change', 'unsynced changes')}?` : 'Sign out'}</button>
+        <p class="hint">Signing out removes your log from this phone. It stays safe in your account.</p>
+        <div class="field danger-zone">
+          <p class="legend">Delete account</p>
+          <p class="hint">${c === 'delete' ? 'This deletes your account and everything synced to it, for good. The log on this phone stays, only on this phone.' : 'Removes your account and all synced data from the server.'}</p>
+          <button type="button" class="btn plain danger" data-act="acc-delete"${acc.busy ? ' disabled' : ''}>${c === 'delete' ? 'Yes, delete my account' : 'Delete account'}</button>
+        </div>
+      </div>`;
+  }
+  const up = acc.mode === 'up';
+  return `${formHead(up ? 'Create account' : 'Sign in')}
+    <div class="form">
+      <div class="seg two" role="group" aria-label="Account" style="--i:${up ? 1 : 0}" data-i="${up ? 1 : 0}">
+        <button type="button" data-act="acc-mode" data-val="in" aria-pressed="${!up}">Sign in</button>
+        <button type="button" data-act="acc-mode" data-val="up" aria-pressed="${up}">Create account</button>
+      </div>
+      <p class="hint lead">${Cloud.status.expired ? 'Your session expired. Sign in again to keep syncing; nothing on this phone was lost.' : 'With an account your log is backed up and in sync on all your devices. Without one, the app works exactly the same, only on this phone.'}</p>
+      <div class="field">
+        <label class="legend" for="acc-email">Email</label>
+        <input class="input" id="acc-email" type="email" inputmode="email" autocomplete="${up ? 'email' : 'username'}" autocapitalize="off" spellcheck="false" value="${esc(acc.email || '')}">
+      </div>
+      <div class="field">
+        <label class="legend" for="acc-pass">Password${up ? ' <small>at least 8 characters</small>' : ''}</label>
+        <input class="input" id="acc-pass" type="password" autocomplete="${up ? 'new-password' : 'current-password'}">
+      </div>
+      ${acc.notice ? `<p class="notice">${esc(acc.notice)}</p>` : ''}
+      <p class="error" id="acc-error"${acc.error ? '' : ' hidden'}>${esc(acc.error)}</p>
+      <button type="button" class="btn pro" data-act="acc-submit"${acc.busy ? ' disabled' : ''}>${acc.busy ? 'One moment…' : up ? 'Create account' : 'Sign in'}</button>
+    </div>`;
+}
+
+async function submitAccount() {
+  if (acc.busy) return;
+  const email = (document.getElementById('acc-email') || {}).value || '';
+  const pass = (document.getElementById('acc-pass') || {}).value || '';
+  acc.email = email.trim();
+  const fail = (msg) => {
+    Object.assign(acc, { busy: false, error: msg });
+    render();
+  };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(acc.email)) return fail('Enter a valid email address.');
+  if (acc.mode === 'up' && pass.length < 8) return fail('Use a password of at least 8 characters.');
+  if (!pass) return fail('Enter your password.');
+  Object.assign(acc, { busy: true, error: '', notice: '' });
+  render();
+  try {
+    if (acc.mode === 'up') {
+      const res = await Cloud.signUp(acc.email, pass);
+      if (res.confirm) {
+        Object.assign(acc, { busy: false, mode: 'in', notice: 'Check your email and confirm your address, then sign in here.' });
+        return render();
+      }
+    } else {
+      await Cloud.signIn(acc.email, pass);
+    }
+  } catch (err) {
+    return fail(err.message);
+  }
+  acc.busy = false;
+  if (Cloud.needsClaim(entries.length)) return render(); // eerst vragen wat er met de data hier moet
+  return claimDevice();
+}
+
+async function claimDevice() {
+  Cloud.claim(settings);
+  render();
+  await Cloud.sync();
+  render();
+  toast(Cloud.status.error ? `Signed in. ${Cloud.status.error.message}` : 'Signed in. Your log is synced.');
+}
+
+async function signOutFlow() {
+  if (acc.busy) return;
+  if (acc.confirm !== 'signout') {
+    acc.busy = true;
+    render();
+    await Cloud.sync(); // eerst alles doorgeven
+    acc.busy = false;
+    if (Cloud.pending(entries) > 0) {
+      acc.confirm = 'signout'; // nog niet alles staat online: eerst bevestigen
+      return render();
+    }
+  }
+  acc.confirm = null;
+  await Cloud.signOut();
+  entries = [];
+  settings = { ...C.DEFAULT_SETTINGS };
+  saveLocal();
+  shown.clear();
+  location.replace('#/log');
+  toast('Signed out. Your log is no longer on this phone.');
+}
+
+async function deleteFlow() {
+  if (acc.busy) return;
+  if (acc.confirm !== 'delete') {
+    acc.confirm = 'delete';
+    return render();
+  }
+  Object.assign(acc, { busy: true, confirm: null, error: '' });
+  render();
+  try {
+    await Cloud.deleteAccount();
+  } catch (err) {
+    Object.assign(acc, { busy: false, error: err.message });
+    return render();
+  }
+  acc.busy = false;
+  location.replace('#/log');
+  toast('Account deleted. The log on this phone is still here.');
+}
+
 function autoGrow(el) {
   el.style.height = 'auto';
   el.style.height = `${el.scrollHeight + 2}px`;
@@ -718,7 +931,8 @@ function deleteDraft() {
   toast(`${NAMES[gone.type] || systemLabel(gone)} deleted`, {
     label: 'Undo',
     run: () => {
-      for (const e of removed) if (!entries.some((x) => x.id === e.id)) entries.push(e);
+      const now = Date.now();
+      for (const e of removed) if (!entries.some((x) => x.id === e.id)) entries.push({ ...e, updated: now });
       persist();
       render();
     },
@@ -1170,9 +1384,10 @@ function logView() {
   return `
     <header class="top"><h1>Log</h1></header>
     ${days || '<p class="empty big-empty">Nothing logged yet. Your first punt or pro play shows up here.</p>'}
+    ${accountBlock()}
     <section class="block backup">
       <h2>Backup</h2>
-      <p class="hint">Your data only lives on this device. Export a backup now and then.</p>
+      <p class="hint">${Cloud.ready() ? 'Your log is backed up to your account. You can still export a copy.' : 'Your data only lives on this device. Export a backup now and then.'}</p>
       <div class="pair">
         <button type="button" class="btn plain" data-act="export"${entries.length ? '' : ' disabled'}>Export JSON</button>
         <button type="button" class="btn plain" data-act="import">Import JSON</button>
@@ -1222,7 +1437,11 @@ async function importData(file) {
     toast(`Import done: ${parts.join(', ')}`, merged.added || merged.updated ? {
       label: 'Undo',
       run: () => {
-        ({ entries, settings } = before);
+        // Teruggezette versies krijgen een nieuwe wijzigingstijd, zodat ze ook op andere toestellen winnen.
+        const now = Date.now();
+        const after = new Map(entries.map((e) => [e.id, e]));
+        entries = before.entries.map((e) => (after.get(e.id) === e ? e : { ...e, updated: now }));
+        settings = before.settings;
         persist();
         render();
       },
@@ -1297,6 +1516,19 @@ const actions = {
   pause: startPause,
   'alarm-close': closeAlarm,
   'cheer-close': closeCheer,
+  'acc-mode': (el) => {
+    Object.assign(acc, { mode: el.dataset.val, error: '', notice: '' });
+    render();
+  },
+  'acc-submit': submitAccount,
+  'acc-claim': claimDevice,
+  'acc-cancel': () => {
+    Cloud.abandon();
+    render();
+  },
+  'acc-sync': () => Cloud.sync(),
+  'acc-signout': signOutFlow,
+  'acc-delete': deleteFlow,
   mode: (el) => {
     Object.assign(ov, { from: MODES.indexOf(ov.mode), mode: el.dataset.val, offset: 0, bar: null });
     render(true);
@@ -1363,6 +1595,10 @@ view.addEventListener('keydown', (e) => {
     e.preventDefault();
     e.target.blur();
   }
+  if (e.key === 'Enter' && (e.target.id === 'acc-email' || e.target.id === 'acc-pass')) {
+    e.preventDefault();
+    submitAccount();
+  }
 });
 
 // Ingedrukt houden: bewust een drempel om tegen een stopadvies in te gaan.
@@ -1407,8 +1643,19 @@ const onHome = () => route().name === 'home' && !draft;
 document.addEventListener('visibilitychange', () => {
   // Bij terugkomst opnieuw tekenen: de dag, de week of de meter kan intussen zijn veranderd.
   if (document.visibilityState !== 'visible') return;
-  if (!draft && route().name !== 'rules') render();
+  if (!draft && !['rules', 'account'].includes(route().name)) render();
   if (onHome()) checkTable();
+  Cloud.sync();
+});
+
+// Synchroniseren zodra er weer verbinding is, en af en toe zolang de app open staat.
+window.addEventListener('online', () => Cloud.sync());
+setInterval(() => {
+  if (document.visibilityState === 'visible') Cloud.sync();
+}, 60000);
+Cloud.onStatus(() => {
+  for (const el of view.querySelectorAll('[data-sync]')) el.textContent = syncLine();
+  if (route().name === 'account' && !acc.busy) render();
 });
 
 // Tijdens een sessie loopt de klok mee, en kan de maximale duur een advies geven.
@@ -1419,6 +1666,7 @@ setInterval(() => {
 }, 20000);
 
 onRoute();
+Cloud.sync();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});

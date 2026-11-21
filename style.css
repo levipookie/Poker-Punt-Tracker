@@ -671,6 +671,25 @@ input.input { min-width: 0; text-align: left; }
 }
 
 .seg button[aria-pressed="true"] { color: var(--text); }
+.seg.two { grid-template-columns: 1fr 1fr; }
+.seg.two::before { width: calc((100% - 8px) / 2); }
+
+/* ---------- account ---------- */
+
+.acct { display: flex; align-items: center; gap: 12px; padding: 15px 14px 15px 16px; border-radius: 20px; }
+.acct:active { background: var(--glass-2); }
+.acct .who { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.acct .who b { font: 600 16px var(--display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct .who small { color: var(--muted); font-size: 14px; }
+.acct .chev { flex: none; width: 18px; height: 18px; color: var(--faint); }
+.account .btn { margin-top: 2px; }
+.acct-card { padding: 18px 20px; }
+.acct-card .eyebrow { font: 600 12px var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.acct-card .mail { margin-top: 6px; font: 700 22px/1.2 var(--display); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.acct-card .sub { margin-top: 8px; color: var(--muted); font-size: 14px; }
+.notice { padding: 12px 14px; border-radius: 14px; background: rgba(var(--green-rgb), 0.12); border: 1px solid rgba(var(--green-rgb), 0.35); font-size: 15px; }
+.btn.danger { color: var(--red); border-color: rgba(var(--red-rgb), 0.45); }
+.danger-zone { margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--line); }
 
 .period {
   display: grid;
