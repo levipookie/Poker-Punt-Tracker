@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Signing in · Punt Tracker</title>
+  <meta name="theme-color" content="#07080c">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="aura" aria-hidden="true"><i class="v"></i><i class="r"></i><i class="g"></i></div>
+  <main class="handoff">
+    <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
+      <circle class="pro" cx="18" cy="18" r="15.9155"/>
+      <circle class="punt" cx="18" cy="18" r="15.9155" stroke-dasharray="46 54"/>
+    </svg>
+    <h1 id="title">Signing in…</h1>
+    <p id="msg" class="hint lead">One moment.</p>
+    <a id="back" class="btn plain" href="./" hidden>Open Punt Tracker</a>
+  </main>
+  <script type="module" src="js/auth-callback.js"></script>
+</body>
+</html>

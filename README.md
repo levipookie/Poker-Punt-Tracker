@@ -46,17 +46,29 @@ Alles wordt uit je log berekend. Een entry bewerken, verwijderen of importeren p
 
 ## Accounts (Supabase)
 
-Met een account staat je log ook online en blijft het gelijk op al je toestellen. Zonder account werkt de app precies hetzelfde, alleen op dat ene toestel. Inloggen gaat met e-mail en wachtwoord; inloglinks en Google openen op iPhone Safari in plaats van de app op je beginscherm.
+Met een account staat je log ook online en blijft het gelijk op al je toestellen. Zonder account werkt de app precies hetzelfde, alleen op dat ene toestel. Inloggen gaat met e-mail en wachtwoord, of met Google. Op iPhone komt inloggen met Google vaak terug in Safari in plaats van in de app op je beginscherm; Safari levert de login dan af bij de app, die hem oppikt zodra je terugschakelt.
 
 De app is local-first: alles wordt eerst op het toestel opgeslagen en op de achtergrond gesynchroniseerd, dus aan tafel zonder bereik werkt alles gewoon. Bij twee wijzigingen van dezelfde entry wint de laatste. Uitloggen haalt het log van dat toestel; het blijft in je account.
 
 **Eenmalig instellen in Supabase**
 
-1. **SQL Editor** → plak de hele inhoud van `supabase/migrations/20261121000000_accounts.sql` → **Run**. Dit maakt de tabellen en de regels die zorgen dat iedereen alleen zijn eigen data ziet.
+1. **SQL Editor** → plak de hele inhoud van `supabase/migrations/20261121000000_accounts.sql` → **Run**, en daarna op dezelfde manier `supabase/migrations/20261122000000_google_handoff.sql`. Dit maakt de tabellen en de regels die zorgen dat iedereen alleen zijn eigen data ziet.
 2. **Authentication → Sign In / Providers → Email**: zet **Confirm email** uit. De ingebouwde e-mail van Supabase stuurt alleen naar leden van je eigen Supabase-team, dus vrienden zouden de bevestigingsmail nooit krijgen.
 3. **Project Settings → API Keys**: kopieer de **Project URL** en de **publishable key** naar `js/config.js`. Beide zijn openbaar: ze staan in elke browser die de app laadt. Gebruik nooit de secret key of de service role key.
 
+**Inloggen met Google (optioneel)**
+
+1. **Google Cloud Console** → APIs & Services → **OAuth consent screen**: maak er een aan (External, app-naam, je e-mail) en publiceer hem.
+2. **Credentials** → Create credentials → **OAuth client ID** → type *Web application*. Zet bij *Authorized redirect URIs*: `https://<jouw-project>.supabase.co/auth/v1/callback`.
+3. **Supabase → Authentication → Sign In / Providers → Google**: aanzetten en de Client ID en Client Secret van stap 2 plakken.
+4. **Supabase → Authentication → URL Configuration**: zet *Site URL* op `https://levipookie.github.io/Poker-Punt-Tracker/` en voeg bij *Redirect URLs* toe: `https://levipookie.github.io/Poker-Punt-Tracker/**`.
+5. Zet in `js/config.js` `GOOGLE_LOGIN` op `true`.
+
 Wachtwoord vergeten werkt pas als je in Supabase een eigen e-mailprovider instelt (Authentication → Emails → SMTP).
+
+## Rondleiding
+
+Bij de allereerste keer openen, en na inloggen op een nieuw toestel, krijg je een korte rondleiding van vijf kaarten. Wie al een log heeft, krijgt hem niet vanzelf. Terugkijken kan via **Rules → Replay the intro**.
 
 ## Goed om te weten
 
@@ -74,6 +86,7 @@ Wachtwoord vergeten werkt pas als je in Supabase een eigen e-mailprovider instel
 | `js/app.js` | Schermen, formulieren en opslag |
 | `js/fx.js` | Effecten: vonken, oplopende cijfers, trillen |
 | `js/cloud.js`, `js/config.js` | Accounts en synchronisatie met Supabase |
+| `auth.html`, `js/auth-callback.js` | Landingspagina na inloggen met Google |
 | `supabase/migrations/` | Database-opzet voor Supabase |
 | `fonts/` | Lettertype Space Grotesk (SIL Open Font License, zie `fonts/OFL.txt`) |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline werking en installatie |

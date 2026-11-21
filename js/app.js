@@ -4,10 +4,12 @@ import * as Cloud from './cloud.js';
 
 const STORE_KEY = 'ppt.v1';
 const SEEN_KEY = 'ppt.seen';
+const TOUR_KEY = 'ppt.tour';
 const view = document.getElementById('view');
 const toastEl = document.getElementById('toast');
 const alarmEl = document.getElementById('alarm');
 const cheerEl = document.getElementById('cheer');
+const tourEl = document.getElementById('tour');
 const importInput = document.getElementById('import-file');
 
 let { entries, settings } = load();
@@ -599,6 +601,7 @@ function rulesView() {
           <li>The app can only warn you when you open it or log something. So log every hit right away.</li>
         </ul>
       </div>
+      <button type="button" class="btn plain" data-act="tour-open">Replay the intro</button>
     </div>`;
 }
 
@@ -655,6 +658,8 @@ function progressView() {
 }
 
 /* ---------- account ---------- */
+
+const GOOGLE = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
 
 function ago(ms) {
   const s = Math.round((Date.now() - ms) / 1000);
@@ -739,7 +744,21 @@ function accountView() {
         </div>
       </div>`;
   }
+  if (Cloud.pendingGoogle()) {
+    return `${formHead('Sign in')}
+      <div class="form">
+        <div class="waiting">
+          <span class="spinner" aria-hidden="true"></span>
+          <p class="hint lead">Finishing your Google sign-in… If it opened in Safari, sign in there and then switch back to this app.</p>
+        </div>
+        <p class="error" id="acc-error"${acc.error ? '' : ' hidden'}>${esc(acc.error)}</p>
+        <button type="button" class="btn ghost" data-act="acc-google-cancel">Cancel</button>
+      </div>`;
+  }
   const up = acc.mode === 'up';
+  const google = Cloud.google ? `
+      <button type="button" class="btn google" data-act="acc-google">${GOOGLE}<span>Continue with Google</span></button>
+      <p class="or">or with email</p>` : '';
   return `${formHead(up ? 'Create account' : 'Sign in')}
     <div class="form">
       <div class="seg two" role="group" aria-label="Account" style="--i:${up ? 1 : 0}" data-i="${up ? 1 : 0}">
@@ -747,6 +766,7 @@ function accountView() {
         <button type="button" data-act="acc-mode" data-val="up" aria-pressed="${up}">Create account</button>
       </div>
       <p class="hint lead">${Cloud.status.expired ? 'Your session expired. Sign in again to keep syncing; nothing on this phone was lost.' : 'With an account your log is backed up and in sync on all your devices. Without one, the app works exactly the same, only on this phone.'}</p>
+      ${google}
       <div class="field">
         <label class="legend" for="acc-email">Email</label>
         <input class="input" id="acc-email" type="email" inputmode="email" autocomplete="${up ? 'email' : 'username'}" autocapitalize="off" spellcheck="false" value="${esc(acc.email || '')}">
@@ -788,9 +808,35 @@ async function submitAccount() {
   } catch (err) {
     return fail(err.message);
   }
+  return afterSignIn();
+}
+
+// Net ingelogd (e-mail of Google): eerst vragen wat er met de data hier moet, anders meteen synchroniseren.
+function afterSignIn() {
   acc.busy = false;
-  if (Cloud.needsClaim(entries.length)) return render(); // eerst vragen wat er met de data hier moet
+  if (Cloud.needsClaim(entries.length)) {
+    if (route().name === 'account') return render();
+    location.hash = '#/account';
+    return undefined;
+  }
   return claimDevice();
+}
+
+// Google: kijken of de login (vanuit Safari) al klaarstaat.
+let googleBusy = false;
+async function pollGoogle() {
+  if (googleBusy || !Cloud.pendingGoogle() || Cloud.user()) return;
+  googleBusy = true;
+  try {
+    if (await Cloud.takeGoogle()) afterSignIn();
+  } catch (err) {
+    if (err.code !== 'offline') {
+      acc.error = err.message;
+      if (route().name === 'account') render();
+    }
+  } finally {
+    googleBusy = false;
+  }
 }
 
 async function claimDevice() {
@@ -799,6 +845,7 @@ async function claimDevice() {
   await Cloud.sync();
   render();
   toast(Cloud.status.error ? `Signed in. ${Cloud.status.error.message}` : 'Signed in. Your log is synced.');
+  if (!tourSeen()) setTimeout(openTour, 600); // eerste keer op dit toestel: de rondleiding
 }
 
 async function signOutFlow() {
@@ -841,6 +888,148 @@ async function deleteFlow() {
   location.replace('#/log');
   toast('Account deleted. The log on this phone is still here.');
 }
+
+/* ---------- rondleiding ---------- */
+
+const tour = { i: 0, n: 5 };
+
+function tourSeen() {
+  try {
+    return localStorage.getItem(TOUR_KEY) === '1';
+  } catch {
+    return true;
+  }
+}
+
+function tourSlides() {
+  const signin = Cloud.enabled && !Cloud.user();
+  return [
+    `<section class="slide s-hello">
+      <div class="art">
+        <svg class="ring hero-ring" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="pro" cx="18" cy="18" r="15.9155"/>
+          <circle class="punt" cx="18" cy="18" r="15.9155" stroke-dasharray="46 54"/>
+        </svg>
+        <p class="word"><span>PUNT</span><span class="b">TRACKER</span></p>
+      </div>
+      <h2>Your mental game, <em class="g">on the record.</em></h2>
+      <p>Log your bad plays, your great plays and every bad beat. The app tells you when it's time to leave the table.</p>
+    </section>`,
+    `<section class="slide s-buttons">
+      <div class="art">
+        <div class="mini klap"><b>Hit</b><span>Bad beat or cooler</span></div>
+        <div class="mini punt"><b>Punt</b><span>A play you knew was bad</span></div>
+        <div class="mini pro"><b>Pro play</b><span>A great decision</span></div>
+        <i class="finger" aria-hidden="true"></i>
+      </div>
+      <h2>Three buttons. <em class="v">Two taps.</em></h2>
+      <p>A <b>hit</b> isn't your fault, but it still adds up. A <b>punt</b> costs what the mistake was worth when you made it. A <b>pro play</b> is the fold, call or discipline you're proud of.</p>
+    </section>`,
+    `<section class="slide s-meter">
+      <div class="art">
+        <div class="tgauge">
+          <svg viewBox="0 0 200 110" aria-hidden="true">
+            <defs><linearGradient id="tour-zones" gradientUnits="userSpaceOnUse" x1="16" y1="0" x2="184" y2="0"><stop offset="0" stop-color="#2ff0a1"/><stop offset="0.5" stop-color="#ffb224"/><stop offset="1" stop-color="#ff4d61"/></linearGradient></defs>
+            <path class="track" d="M16 100A84 84 0 0 1 184 100" pathLength="100"/>
+            <path class="fill" d="M16 100A84 84 0 0 1 184 100" pathLength="100"/>
+            <g class="knob"><circle cx="16" cy="100" r="7.5"/></g>
+          </svg>
+          <div class="zones"><b class="z1">Sharp</b><b class="z2">Break</b><b class="z3">Stop</b></div>
+        </div>
+      </div>
+      <h2>Tilt builds quietly. <em class="a">The meter sees it.</em></h2>
+      <p>Hits, punts and hours at the table fill the meter. <b>Orange</b> means a 10-minute break. <b>Red</b> means your session is over, before it goes wrong.</p>
+    </section>`,
+    `<section class="slide s-xp">
+      <div class="art">
+        <div class="chips"><span>+10</span><span>+30</span><span class="big">+100 XP</span></div>
+        <div class="tbar"><i></i></div>
+        <p class="lvl">LEVEL UP</p>
+        <p class="streak"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.4 2.5c.6 3.1-.9 4.9-2.4 6.6C8.5 10.8 7 12.5 7 15c0 2.9 2.2 5.5 5 5.5s5-2.4 5-5.5c0-1.7-.6-3.2-1.6-4.4-.3 1.2-1 2.1-2 2.6.6-3.6-.1-7.5-1-10.7z"/></svg><span class="n"><i>1</i><i>2</i><i>3</i></span> streak</p>
+      </div>
+      <h2>Good decisions <em class="g">pay out.</em></h2>
+      <p>Earn XP for every good call. Chain them for a <b>combo</b>, keep your <b>streak</b> alive, and climb from Tilt Monkey to Stone Buddha.</p>
+    </section>`,
+    `<section class="slide s-rules">
+      <div class="art">
+        <div class="rule"><span>Stop-loss</span><b>3 stacks</b></div>
+        <div class="rule"><span>Max session</span><b>6 hours</b></div>
+        <div class="rule note"><span>Note to self</span><b>Normally you just fold when you're beat.</b></div>
+      </div>
+      <h2>Set your rules <em class="v">with a clear head.</em></h2>
+      <p>At the table the meter decides, not how you feel in the moment. You can change your rules any time.</p>
+      ${signin ? '<button type="button" class="btn plain" data-act="tour-signin">Sign in to sync your log</button>' : ''}
+    </section>`,
+  ];
+}
+
+function openTour() {
+  tour.i = 0;
+  tourEl.innerHTML = `
+    <div class="tour-top">
+      <span class="count" id="tour-count"></span>
+      <button type="button" class="skip" data-act="tour-skip">Skip</button>
+    </div>
+    <div class="tour-view"><div class="tour-track" id="tour-track">${tourSlides().join('')}</div></div>
+    <div class="tour-bottom">
+      <div class="dots">${Array.from({ length: tour.n }, (_, k) => `<button type="button" data-act="tour-dot" data-val="${k}" aria-label="Step ${k + 1}"></button>`).join('')}</div>
+      <button type="button" class="btn pro" id="tour-next" data-act="tour-next">Next</button>
+    </div>`;
+  tourEl.hidden = false;
+  document.body.classList.add('has-alarm');
+  setInert(true);
+  tourGo(0);
+}
+
+function tourGo(i) {
+  if (i >= tour.n) return closeTour();
+  tour.i = Math.max(0, i);
+  const track = document.getElementById('tour-track');
+  track.style.transform = `translateX(${-100 * tour.i}%)`;
+  track.querySelectorAll('.slide').forEach((el, k) => el.classList.toggle('on', k === tour.i));
+  tourEl.querySelectorAll('.dots button').forEach((el, k) => el.setAttribute('aria-current', k === tour.i ? 'step' : 'false'));
+  document.getElementById('tour-count').textContent = `${tour.i + 1} / ${tour.n}`;
+  const next = document.getElementById('tour-next');
+  const last = tour.i === tour.n - 1;
+  next.textContent = last ? "Let's go" : 'Next';
+  next.dataset.act = last ? 'tour-done' : 'tour-next';
+  tourEl.querySelector('.skip').hidden = last;
+}
+
+function closeTour() {
+  try {
+    localStorage.setItem(TOUR_KEY, '1');
+  } catch {
+    // Dan komt hij hooguit nog een keer.
+  }
+  const wasLast = tour.i === tour.n - 1;
+  tourEl.hidden = true;
+  tourEl.innerHTML = '';
+  document.body.classList.remove('has-alarm');
+  setInert(false);
+  if (wasLast) FX.burst(window.innerWidth / 2, window.innerHeight * 0.72, { tone: 'pro', count: 50 });
+}
+
+// Vegen tussen de kaarten.
+let swipe = null;
+tourEl.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('button')) return;
+  swipe = { x: e.clientX, y: e.clientY };
+});
+tourEl.addEventListener('pointerup', (e) => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x;
+  const dy = e.clientY - swipe.y;
+  swipe = null;
+  if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) tourGo(tour.i + (dx < 0 ? 1 : -1));
+});
+tourEl.addEventListener('pointercancel', () => { swipe = null; });
+document.addEventListener('keydown', (e) => {
+  if (tourEl.hidden) return;
+  if (e.key === 'ArrowRight') tourGo(tour.i + 1);
+  if (e.key === 'ArrowLeft') tourGo(tour.i - 1);
+  if (e.key === 'Escape') closeTour();
+});
 
 function autoGrow(el) {
   el.style.height = 'auto';
@@ -1522,6 +1711,22 @@ const actions = {
   },
   'acc-submit': submitAccount,
   'acc-claim': claimDevice,
+  'acc-google': () => location.assign(Cloud.googleUrl()),
+  'acc-google-cancel': () => {
+    Cloud.cancelGoogle();
+    acc.error = '';
+    render();
+  },
+  'tour-next': () => tourGo(tour.i + 1),
+  'tour-back': () => tourGo(tour.i - 1),
+  'tour-dot': (el) => tourGo(Number(el.dataset.val)),
+  'tour-skip': closeTour,
+  'tour-done': closeTour,
+  'tour-signin': () => {
+    closeTour();
+    location.hash = '#/account';
+  },
+  'tour-open': openTour,
   'acc-cancel': () => {
     Cloud.abandon();
     render();
@@ -1646,6 +1851,7 @@ document.addEventListener('visibilitychange', () => {
   if (!draft && !['rules', 'account'].includes(route().name)) render();
   if (onHome()) checkTable();
   Cloud.sync();
+  pollGoogle();
 });
 
 // Synchroniseren zodra er weer verbinding is, en af en toe zolang de app open staat.
@@ -1667,6 +1873,11 @@ setInterval(() => {
 
 onRoute();
 Cloud.sync();
+if (Cloud.takeJustSignedIn()) afterSignIn(); // terug van Google in de app zelf
+else if (!tourSeen() && !entries.length && !Cloud.user() && !Cloud.pendingGoogle()) openTour(); // eerste keer
+setInterval(() => {
+  if (document.visibilityState === 'visible') pollGoogle();
+}, 2000);
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});

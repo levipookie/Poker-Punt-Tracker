@@ -1,6 +1,6 @@
 // Service worker: de hele app staat in de cache en werkt dus offline.
 // Verhoog VERSION bij een release om oude caches op te ruimen.
-const VERSION = 'v7';
+const VERSION = 'v8';
 const CACHE = `punt-tracker-${VERSION}`;
 const ASSETS = [
   './',
@@ -11,6 +11,8 @@ const ASSETS = [
   './js/fx.js',
   './js/cloud.js',
   './js/config.js',
+  './js/auth-callback.js',
+  './auth.html',
   './fonts/space-grotesk.woff2',
   './manifest.webmanifest',
   './icons/icon.svg',
@@ -44,7 +46,9 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const key = request.mode === 'navigate' ? './index.html' : request;
+    // Alleen de app zelf valt terug op index.html; auth.html is een eigen pagina.
+    const path = new URL(request.url).pathname;
+    const key = request.mode === 'navigate' && !path.endsWith('/auth.html') ? './index.html' : request;
     const cached = await cache.match(key, { ignoreSearch: true });
     const refresh = fetch(request)
       .then((response) => {

@@ -3,3 +3,6 @@
 // Laat ze leeg om de app zonder accounts te gebruiken.
 export const SUPABASE_URL = '';
 export const SUPABASE_KEY = '';
+
+// Zet op true zodra Google als provider is ingesteld in Supabase (zie de README).
+export const GOOGLE_LOGIN = false;

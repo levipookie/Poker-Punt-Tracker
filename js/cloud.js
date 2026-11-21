@@ -1,16 +1,21 @@
 // Accounts en synchronisatie met Supabase, zonder SDK: gewone fetch-aanroepen naar de
 // Auth- en REST-API. De app blijft local-first: alles staat eerst in localStorage en
 // wordt op de achtergrond bijgewerkt. Zonder verbinding werkt alles gewoon door.
-import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
+import * as config from './config.js';
 import { cleanEntry, cleanSettings } from './core.js';
 
 const AUTH_KEY = 'ppt.auth';
 const SYNC_KEY = 'ppt.sync';
 const PAGE = 500;
 const OVERLAP_MS = 60000; // marge bij het ophalen, voor schrijfacties die net later binnenkwamen
-const BASE = String(SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_KEY = config.SUPABASE_KEY || '';
+const BASE = String(config.SUPABASE_URL || '').replace(/\/+$/, '');
+const HANDOFF_KEY = 'ppt.handoff';
+const JUST_KEY = 'ppt.justSignedIn';
+const HANDOFF_MS = 10 * 60000;
 
 export const enabled = Boolean(BASE && SUPABASE_KEY);
+export const google = Boolean(enabled && config.GOOGLE_LOGIN);
 
 function read(key, fallback) {
   try {
@@ -172,6 +177,74 @@ export async function signUp(email, password) {
     return { signedIn: true };
   }
   return { confirm: true }; // e-mailbevestiging staat aan in Supabase
+}
+
+/* ---------- inloggen met Google ---------- */
+
+// Start: een geheime code onthouden en naar Google. Na het inloggen komt de browser terug op
+// auth.html, in de app zelf of (op iPhone vaak) in Safari.
+export function googleUrl() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const id = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  write(HANDOFF_KEY, { id, at: Date.now() });
+  const back = new URL('auth.html', location.href);
+  back.hash = '';
+  back.search = `?h=${id}`;
+  return `${BASE}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(back.href)}`;
+}
+
+export function pendingGoogle() {
+  const h = read(HANDOFF_KEY, null);
+  return h && Date.now() - h.at < HANDOFF_MS ? h : null;
+}
+
+export function cancelGoogle() {
+  write(HANDOFF_KEY, null);
+  emit();
+}
+
+// Ingelogd op deze pagina (bv. na Google): de app weet dit bij het openen.
+export function takeJustSignedIn() {
+  const flag = read(JUST_KEY, false);
+  if (flag) write(JUST_KEY, null);
+  return flag;
+}
+
+// Op auth.html: de tokens uit de adresbalk afhandelen.
+export async function finishGoogle(loc) {
+  const frag = new URLSearchParams(loc.hash.replace(/^#/, ''));
+  const query = new URLSearchParams(loc.search);
+  const problem = frag.get('error_description') || query.get('error_description') || frag.get('error') || query.get('error');
+  if (problem) throw new CloudError(problem.replace(/\+/g, ' '), 'oauth', 400);
+  const access = frag.get('access_token');
+  const refreshToken = frag.get('refresh_token');
+  const h = query.get('h') || '';
+  if (!access || !refreshToken) throw new CloudError('The sign-in did not finish. Go back to the app and try again.', 'oauth', 400);
+  const u = await request('/auth/v1/user', { token: access });
+  const pending = pendingGoogle();
+  if (pending && pending.id === h) {
+    // Teruggekomen in de app zelf: gewoon inloggen.
+    const expiresIn = Number(frag.get('expires_in')) || 3600;
+    keep({ access_token: access, refresh_token: refreshToken, expires_at: Number(frag.get('expires_at')) || Math.floor(Date.now() / 1000) + expiresIn, user: u });
+    write(HANDOFF_KEY, null);
+    write(JUST_KEY, true);
+    return { here: true, email: u.email };
+  }
+  // In een andere browser beland (Safari): de login klaarzetten voor de app.
+  await request('/rest/v1/rpc/handoff_put', { method: 'POST', body: { handoff: h, token: refreshToken }, token: access });
+  return { here: false, email: u.email };
+}
+
+// In de app: kijken of Safari de login al heeft klaargezet.
+export async function takeGoogle() {
+  const pending = pendingGoogle();
+  if (!pending) return false;
+  const token = await request('/rest/v1/rpc/handoff_take', { method: 'POST', body: { handoff: pending.id } });
+  if (!token) return false;
+  keep(await request('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: { refresh_token: token } }));
+  write(HANDOFF_KEY, null);
+  emit();
+  return true;
 }
 
 export async function signIn(email, password) {

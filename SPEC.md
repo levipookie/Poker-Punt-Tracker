@@ -48,4 +48,5 @@ Deze keuzes zijn na de eerste versie gemaakt en gaan boven wat hierboven staat:
 - De app heeft een moderne look met beweging en effecten, in plaats van "geen overbodige animaties".
 - Er is een tiltmeter bij gekomen: je logt ook bad beats en coolers ("Hit"), en de app adviseert een pauze of stoppen. Zie de README.
 - Goede mental-game-beslissingen leveren XP op, met een combo per sessie, een sessiestreak en levels. Zie de README.
-- Optionele accounts via Supabase (e-mail en wachtwoord), met synchronisatie tussen toestellen. Zonder account blijft alles lokaal, zoals in de oorspronkelijke spec. Zie de README.
+- Optionele accounts via Supabase (e-mail en wachtwoord, of Google), met synchronisatie tussen toestellen. Zonder account blijft alles lokaal, zoals in de oorspronkelijke spec. Zie de README.
+- Een rondleiding van vijf kaarten bij de eerste keer openen en na inloggen op een nieuw toestel.
