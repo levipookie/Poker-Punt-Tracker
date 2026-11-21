@@ -12,15 +12,28 @@ export const REASONS = [
   ['anders', 'Other'],
 ];
 
+// Een pro play is een sterke mental-game-beslissing, geen pokertechniek.
 export const KINDS = [
-  ['hero-fold', 'Hero fold'],
+  ['hero-fold', 'Folded when beat'],
+  ['reset', 'Reset after a beat'],
+  ['patient', 'Stayed patient'],
+  ['no-fancy', 'Skipped fancy play'],
+  ['stakes', 'Stuck to my stakes'],
+  ['break', 'Took a break'],
+  ['discipline', 'Quit on time'],
+  ['anders', 'Other'],
+];
+
+// Soorten uit eerdere versies: ze blijven leesbaar in het log, maar je kiest ze niet meer.
+const OLD_KINDS = [
   ['hero-call', 'Hero call'],
   ['thin-value', 'Thin value'],
   ['bluff', 'Bluff'],
   ['exploit', 'Exploit'],
-  ['discipline', 'Discipline'],
-  ['anders', 'Other'],
 ];
+const ALL_KINDS = [...KINDS, ...OLD_KINDS];
+export const kindLabel = (kind) => labelOf(ALL_KINDS, kind);
+export const isOldKind = (kind) => OLD_KINDS.some(([k]) => k === kind);
 
 // Een klap is een bad beat of cooler: goed gespeeld en toch verloren.
 export const SIZES = [
@@ -173,7 +186,7 @@ export function cleanEntry(raw) {
     return { ...base, type: 'punt', cents: raw.cents, reason };
   }
   if (raw.type === 'pro') {
-    const kind = KINDS.some(([k]) => k === raw.kind) ? raw.kind : 'anders';
+    const kind = ALL_KINDS.some(([k]) => k === raw.kind) ? raw.kind : 'anders';
     return { ...base, type: 'pro', kind };
   }
   if (raw.type === 'klap') return { ...base, type: 'klap', size: raw.size === 'stack' ? 'stack' : 'pot' };
@@ -464,7 +477,7 @@ export function progress(entries, now) {
           run = 0;
         } else if (e.type === 'pro' || e.type === 'klap') {
           const mult = multFor(run);
-          const label = e.type === 'pro' ? `Pro play: ${labelOf(KINDS, e.kind)}` : 'Took a hit and logged it';
+          const label = e.type === 'pro' ? `Pro play: ${kindLabel(e.kind)}` : 'Took a hit and logged it';
           award(e, Math.round((e.type === 'pro' ? XP.pro : XP.hit) * mult), label, mult);
           run += 1;
         } else if (e.type === 'pauze') {
@@ -493,7 +506,7 @@ export function progress(entries, now) {
     });
     // Pro plays die je achteraf logt, buiten een sessie, tellen ook: zonder combo.
     for (const e of day) {
-      if (e.type === 'pro' && !inSession.has(e.id)) award(e, XP.pro, `Pro play: ${labelOf(KINDS, e.kind)}`);
+      if (e.type === 'pro' && !inSession.has(e.id)) award(e, XP.pro, `Pro play: ${kindLabel(e.kind)}`);
     }
   }
   events.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));

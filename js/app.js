@@ -136,7 +136,7 @@ function systemLabel(e) {
 
 function describe(e) {
   if (e.type === 'punt') return `${money(e.cents)} · ${C.labelOf(C.REASONS, e.reason)}`;
-  if (e.type === 'pro') return C.labelOf(C.KINDS, e.kind);
+  if (e.type === 'pro') return C.kindLabel(e.kind);
   if (e.type === 'klap') return C.labelOf(C.SIZES, e.size);
   return systemLabel(e);
 }
@@ -419,7 +419,7 @@ function homeView() {
         <a class="big pro" href="#/pro" data-nav>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.2 6.3 6.3 2.2-6.3 2.2-2.2 6.3-2.2-6.3L3.5 12l6.3-2.2z"/></svg>
           <strong>Pro play</strong>
-          <span>+EV play</span>
+          <span>Mental win</span>
         </a>
       </div>
     </div>`;
@@ -527,7 +527,7 @@ function proForm() {
       <div class="field">
         <p class="legend">Type</p>
         <div class="chips two">
-          ${C.KINDS.map(([k, label]) => chip('pick-kind', k, label, d.kind === k, 'pro')).join('')}
+          ${(C.isOldKind(d.kind) ? [[d.kind, C.kindLabel(d.kind)], ...C.KINDS] : C.KINDS).map(([k, label]) => chip('pick-kind', k, label, d.kind === k, 'pro')).join('')}
         </div>
       </div>
       ${noteField('What did you do, and why?', 4, false)}
@@ -923,7 +923,7 @@ function tourSlides() {
         <i class="finger" aria-hidden="true"></i>
       </div>
       <h2>Three buttons. <em class="v">Two taps.</em></h2>
-      <p>A <b>hit</b> isn't your fault, but it still adds up. A <b>punt</b> costs what the mistake was worth when you made it. A <b>pro play</b> is the fold, call or discipline you're proud of.</p>
+      <p>A <b>hit</b> isn't your fault, but it still adds up. A <b>punt</b> costs what the mistake was worth when you made it. A <b>pro play</b> is a mental-game win: folding when you're beat, staying patient, quitting on time.</p>
     </section>`,
     `<section class="slide s-meter">
       <div class="art">
@@ -1458,7 +1458,7 @@ function overviewView() {
         <li><a class="entry pro" href="#/edit/${encodeURIComponent(e.id)}" data-nav>
           <span class="when">${fmtShort.format(C.sessionDay(e.ts))}</span>
           <span class="body">
-            <span class="title">${C.labelOf(C.KINDS, e.kind)}</span>
+            <span class="title">${C.kindLabel(e.kind)}</span>
             ${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}
           </span>
         </a></li>`).join('')}</ul>`
@@ -1540,7 +1540,7 @@ function weekChart(range, now) {
 
 function entryTitle(e) {
   if (e.type === 'punt') return `<b>${money(e.cents)}</b> ${C.labelOf(C.REASONS, e.reason)}`;
-  if (e.type === 'pro') return `<b>Pro play</b> ${C.labelOf(C.KINDS, e.kind)}`;
+  if (e.type === 'pro') return `<b>Pro play</b> ${C.kindLabel(e.kind)}`;
   if (e.type === 'klap') return `<b>Hit</b> ${C.labelOf(C.SIZES, e.size)}`;
   return systemLabel(e);
 }
