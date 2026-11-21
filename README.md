@@ -17,6 +17,22 @@ Statische site zonder build-stap: HTML, CSS en vanilla JS. Geen backend, geen ac
 
 Open de app daarna één keer met internet aan. Vanaf dat moment werkt hij ook zonder verbinding.
 
+## Tiltmeter: wanneer moet je van tafel?
+
+Tilt bouwt zich op zonder dat je het merkt. Daarom telt de app mee in plaats van op je gevoel te vertrouwen.
+
+- Tik **Start sessie** als je gaat zitten. Vergeet je dat, dan start de eerste klap of punt de sessie vanzelf.
+- Log elke **klap** (bad beat of cooler: goed gespeeld, toch verloren) als *Pot kwijt* of *Stack kwijt*. Dat zijn twee tikken.
+- Klappen, punts en speeltijd tellen op tot een stand van 0 tot 100%. Wat langer geleden is, weegt minder.
+- **Oranje**: de app zegt dat je 10 minuten van tafel moet en telt de pauze af.
+- **Rood**: stopadvies, met je eigen bericht aan jezelf erbij. Toch doorspelen kan alleen door een knop 2,5 seconde ingedrukt te houden.
+- Direct rood, ongeacht de stand: een punt uit tilt, een tweede punt in één sessie, je stop-loss in stacks, of je maximale sessieduur.
+- Ga je van tafel na een stopadvies, dan logt de app dat als pro play (Discipline). In het overzicht zie je wat doorspelen ná een stopadvies je heeft gekost.
+
+De grenzen stel je in onder **Regels** (op de meter): stop-loss, maximale sessieduur, gevoeligheid en je bericht aan jezelf.
+
+Let op: een web-app kan geen melding sturen als hij dicht is. De meter waarschuwt dus alleen op het moment dat je iets logt of de app opent.
+
 ## Goed om te weten
 
 - **Je data staat alleen op dat ene toestel.** Op iPhone heeft de app op het beginscherm een eigen opslag, los van Safari. Installeer dus eerst en begin dan pas met loggen.
@@ -29,7 +45,7 @@ Open de app daarna één keer met internet aan. Vanaf dat moment werkt hij ook z
 | Bestand | Wat erin staat |
 | --- | --- |
 | `index.html`, `style.css` | Pagina, vormgeving en animaties |
-| `js/core.js` | Rekenlogica: sessiedag, weken, totalen, import |
+| `js/core.js` | Rekenlogica: sessiedag, weken, totalen, import, sessies en tiltmeter |
 | `js/app.js` | Schermen, formulieren en opslag |
 | `js/fx.js` | Effecten: vonken, oplopende cijfers, trillen |
 | `fonts/` | Lettertype Space Grotesk (SIL Open Font License, zie `fonts/OFL.txt`) |

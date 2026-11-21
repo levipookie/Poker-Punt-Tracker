@@ -7,6 +7,7 @@ export const motionOk = () => !reduced.matches;
 const TONES = {
   punt: ['#ff4d61', '#ff8f7a', '#ffd0c8'],
   pro: ['#2ff0a1', '#8dffd0', '#eafff6'],
+  klap: ['#8f7bff', '#b9adff', '#efeaff'],
 };
 
 let canvas = null;

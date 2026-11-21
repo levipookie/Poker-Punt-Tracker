@@ -2,34 +2,45 @@ import * as C from './core.js';
 import * as FX from './fx.js';
 
 const STORE_KEY = 'ppt.v1';
+const SEEN_KEY = 'ppt.seen';
 const view = document.getElementById('view');
 const toastEl = document.getElementById('toast');
+const alarmEl = document.getElementById('alarm');
 const importInput = document.getElementById('import-file');
 
-let entries = loadEntries();
+let { entries, settings } = load();
 let draft = null; // het formulier dat open staat
-let cameFromApp = false; // true als het formulier via een tik in de app is geopend
+let cameFromApp = false; // true als het scherm via een tik in de app is geopend
 let logScroll = 0;
 const ov = { mode: 'week', offset: 0, bar: null, from: 0 };
 const MODES = ['week', 'maand', 'alles'];
 const TABS = ['home', 'overzicht', 'log'];
+const SYSTEM = ['start', 'stop', 'pauze', 'stopadvies']; // entries die de app zelf aanmaakt
+const RANK = { groen: 0, oranje: 1, rood: 2 };
+const ZONE = { groen: 'Scherp', oranje: 'Pauze', rood: 'Stop' };
 const shown = new Map(); // laatst getoonde waarde per teller, voor het oplopen
 let pendingFx = null; // entry die net is gelogd en nog gevierd moet worden
+let lastAdded = null; // { id, at } van de laatst gelogde entry, als oorzaak van een stopadvies
+let alarm = null; // het schermvullende advies dat open staat: { kind, rank, until }
 
 /* ---------- opslag ---------- */
 
-function loadEntries() {
+function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    return raw ? C.parseBackup(raw).entries : [];
+    if (raw) {
+      const data = C.parseBackup(raw);
+      return { entries: data.entries, settings: data.settings || { ...C.DEFAULT_SETTINGS } };
+    }
   } catch {
-    return [];
+    // Onleesbare opslag: begin leeg in plaats van te crashen.
   }
+  return { entries: [], settings: { ...C.DEFAULT_SETTINGS } };
 }
 
 function persist() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ version: 1, entries }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ version: 1, entries, settings }));
     return true;
   } catch {
     toast('Opslaan mislukt: de opslag van dit toestel is vol of geblokkeerd.');
@@ -40,6 +51,12 @@ function persist() {
 function newId() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
+
+function make(type, fields = {}, at = Date.now()) {
+  return { id: newId(), type, ts: new Date(at).toISOString(), note: '', updated: Date.now(), ...fields };
+}
+
+const table = (now = Date.now()) => C.tableState(entries, now, settings);
 
 /* ---------- weergavehulpjes ---------- */
 
@@ -74,11 +91,27 @@ function plainAmount(cents) {
   return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2).replace('.', ',');
 }
 
+function systemLabel(e) {
+  if (e.type === 'start') return 'Sessie gestart';
+  if (e.type === 'stop') return e.advice ? 'Van tafel op stopadvies' : 'Sessie gestopt';
+  if (e.type === 'pauze') return 'Pauze genomen';
+  return 'Stopadvies van de tiltmeter';
+}
+
+function describe(e) {
+  if (e.type === 'punt') return `${money(e.cents)} · ${C.labelOf(C.REASONS, e.reason)}`;
+  if (e.type === 'pro') return C.labelOf(C.KINDS, e.kind);
+  if (e.type === 'klap') return C.labelOf(C.SIZES, e.size);
+  return systemLabel(e);
+}
+
+const NAMES = { punt: 'Punt', pro: 'Pro play', klap: 'Klap' };
+
 /* ---------- routing ---------- */
 
 function route() {
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
-  if (['punt', 'pro', 'overzicht', 'log'].includes(name)) return { name };
+  if (['punt', 'pro', 'klap', 'regels', 'overzicht', 'log'].includes(name)) return { name };
   if (name === 'bewerk') return { name, id: decodeURIComponent(arg || '') };
   return { name: 'home' };
 }
@@ -90,6 +123,8 @@ function onRoute() {
     draft = { mode: 'new', type: 'punt', cents: null, custom: '', reason: null, note: '' };
   } else if (r.name === 'pro') {
     draft = { mode: 'new', type: 'pro', kind: null, note: '' };
+  } else if (r.name === 'klap') {
+    draft = { mode: 'new', type: 'klap', size: null, note: '' };
   } else if (r.name === 'bewerk') {
     const e = entries.find((x) => x.id === r.id);
     if (!e) {
@@ -106,6 +141,8 @@ function onRoute() {
   render(true);
   window.scrollTo(0, r.name === 'log' ? logScroll : 0);
   if (fx) celebrate(fx);
+  // Laat eerst het cijfer oplopen; daarna pas het eventuele advies.
+  if (r.name === 'home') setTimeout(checkTable, fx && FX.motionOk() ? 800 : 0);
 }
 
 function closeForm(fallback = '#/') {
@@ -119,7 +156,8 @@ function closeForm(fallback = '#/') {
 
 function render(animate = false) {
   const r = route();
-  document.body.classList.toggle('is-form', Boolean(draft));
+  const full = Boolean(draft) || r.name === 'regels';
+  document.body.classList.toggle('is-form', full);
   document.body.dataset.tone = draft ? draft.type : '';
   const nav = document.querySelector('.tabbar');
   if (TABS.includes(r.name)) nav.style.setProperty('--i', TABS.indexOf(r.name));
@@ -128,21 +166,23 @@ function render(animate = false) {
     else a.removeAttribute('aria-current');
   }
   view.classList.toggle('animate', animate && FX.motionOk());
-  if (draft) view.innerHTML = draft.type === 'punt' ? puntForm() : proForm();
+  if (draft) view.innerHTML = formFor(draft.type);
+  else if (r.name === 'regels') view.innerHTML = rulesView();
   else if (r.name === 'overzicht') view.innerHTML = overviewView();
   else if (r.name === 'log') view.innerHTML = logView();
   else view.innerHTML = homeView();
-  const note = view.querySelector('textarea');
-  if (note) autoGrow(note);
+  for (const area of view.querySelectorAll('textarea')) autoGrow(area);
   afterRender();
 }
 
-// Sfeer en beweging na elke render: achtergrondgloed, oplopende cijfers, schuivende keuzeknop.
+// Sfeer en beweging na elke render: achtergrondgloed, oplopende cijfers, meter en schuivende keuzeknop.
 function afterRender() {
   const week = C.summarize(entries.filter((e) => C.inRange(e, C.periodRange('week', 0, Date.now()))));
+  const st = table();
   const root = document.documentElement.style;
-  root.setProperty('--heat', Math.min(week.lost / 50000, 1).toFixed(3));
+  root.setProperty('--heat', Math.max(Math.min(week.lost / 50000, 1), st.active ? st.pct / 100 : 0).toFixed(3));
   root.setProperty('--cool', Math.min(week.pros / 4, 1).toFixed(3));
+  document.body.dataset.zone = st.active ? st.zone : '';
 
   for (const el of view.querySelectorAll('[data-count]')) {
     const to = Number(el.dataset.count);
@@ -150,26 +190,39 @@ function afterRender() {
     shown.set(el.dataset.key, to);
     FX.countTo(el, from, to, money);
   }
+  const gauge = view.querySelector('.gauge');
+  if (gauge) {
+    shown.set('gauge', Number(gauge.dataset.p));
+    requestAnimationFrame(() => gauge.style.setProperty('--p', gauge.dataset.p));
+  }
   const seg = view.querySelector('.seg');
   if (seg) requestAnimationFrame(() => seg.style.setProperty('--i', seg.dataset.i));
 }
 
 // Na het loggen: vonken en een zwevend label bij het cijfer dat verandert.
 function celebrate(entry) {
-  const hero = view.querySelector('.hero');
-  if (!hero) return;
+  const amount = view.querySelector('[data-key="home-week"]');
+  if (!amount) return;
+  const card = amount.closest('.card');
   if (entry.type === 'punt') {
-    const box = hero.querySelector('.amount').getBoundingClientRect();
+    const box = amount.getBoundingClientRect();
     FX.floatLabel(`+${money(entry.cents)}`, Math.min(box.right + 10, window.innerWidth - 110), box.top + 4, 'punt');
     FX.burst(box.left + box.width / 2, box.bottom - 8, { tone: 'punt', dir: 'down', count: 28, spread: box.width });
-    FX.pulse(hero, 'hit-punt');
+    FX.pulse(card, 'hit-punt');
     FX.buzz(40);
-  } else {
-    const box = hero.querySelector('.counts li:last-child').getBoundingClientRect();
-    FX.floatLabel('+1 pro play', Math.min(box.right + 12, window.innerWidth - 130), box.top + 5, 'pro');
+  } else if (entry.type === 'pro') {
+    const box = card.querySelector('[data-pro]').getBoundingClientRect();
+    FX.floatLabel('+1 pro play', Math.min(box.right + 12, window.innerWidth - 130), box.top + 2, 'pro');
     FX.burst(box.left + 14, box.top + box.height / 2, { tone: 'pro', count: 44 });
-    FX.pulse(hero, 'hit-pro');
+    FX.pulse(card, 'hit-pro');
     FX.buzz([15, 50, 15]);
+  } else if (entry.type === 'klap') {
+    const meter = view.querySelector('.table');
+    if (!meter) return;
+    const box = meter.querySelector('.gauge').getBoundingClientRect();
+    FX.burst(box.left + box.width / 2, box.top + box.height * 0.55, { tone: 'klap', count: entry.size === 'stack' ? 46 : 30 });
+    FX.pulse(meter, 'hit-klap');
+    FX.buzz(entry.size === 'stack' ? [30, 40, 30] : 30);
   }
 }
 
@@ -182,8 +235,8 @@ function weekStrip(now) {
     const day = C.addDays(start, i);
     const key = C.dayKey(day);
     const list = entries.filter((e) => C.dayKey(C.sessionDay(e.ts)) === key);
-    const punts = list.filter((e) => e.type === 'punt').length;
-    const dots = '<i class="punt"></i>'.repeat(Math.min(punts, 3)) + '<i class="pro"></i>'.repeat(Math.min(list.length - punts, 3));
+    const count = (type) => Math.min(list.filter((e) => e.type === type).length, 3);
+    const dots = '<i class="punt"></i>'.repeat(count('punt')) + '<i class="pro"></i>'.repeat(count('pro'));
     const state = key === C.dayKey(today) ? ' class="today"' : day > today ? ' class="future"' : '';
     return `<li${state}><span class="cell">${dots}</span><span class="d">${letter}</span></li>`;
   });
@@ -201,32 +254,99 @@ function ring(punts, pros) {
     </svg>`;
 }
 
+function whyLine(st) {
+  if (st.redAt) return `Stopadvies sinds ${fmtTime.format(new Date(st.redAt))}. Ga van tafel.`;
+  if (st.reasons.length) return st.reasons.join(' · ');
+  return 'Nog niets aan de hand. Log elke klap, dan houdt de meter het bij.';
+}
+
+// De tiltmeter van de lopende sessie.
+function tableCard(st) {
+  const from = shown.has('gauge') ? shown.get('gauge') : 0;
+  return `
+    <section class="card table" data-zone="${st.zone}">
+      <header>
+        <h2>Aan tafel</h2>
+        <p class="timer">${C.duration(st.minutes)}</p>
+      </header>
+      <div class="gauge" style="--p:${from}" data-p="${st.pct}">
+        <svg viewBox="0 0 200 110" aria-hidden="true">
+          <defs>
+            <linearGradient id="gauge-zones" gradientUnits="userSpaceOnUse" x1="16" y1="0" x2="184" y2="0">
+              <stop offset="0" stop-color="#2ff0a1"/>
+              <stop offset="0.5" stop-color="#ffb224"/>
+              <stop offset="1" stop-color="#ff4d61"/>
+            </linearGradient>
+          </defs>
+          <path class="track" d="M16 100A84 84 0 0 1 184 100" pathLength="100"/>
+          <path class="fill" d="M16 100A84 84 0 0 1 184 100" pathLength="100"/>
+          <path class="mark" d="M100 2v7"/>
+          <g class="knob"><circle cx="16" cy="100" r="7.5"/></g>
+        </svg>
+        <div class="read">
+          <strong>${ZONE[st.zone]}</strong>
+          <span>tiltmeter <b>${st.pct}%</b></span>
+        </div>
+      </div>
+      <p class="why">${esc(whyLine(st))}</p>
+      <div class="pair">
+        <button type="button" class="btn plain${st.zone === 'rood' ? ' pro' : ''}" data-act="stop-session">${st.zone === 'rood' ? 'Ik ga van tafel' : 'Stop sessie'}</button>
+        <a class="btn plain" href="#/regels" data-nav>Regels</a>
+      </div>
+    </section>`;
+}
+
 function homeView() {
   const now = Date.now();
   const sum = (mode) => C.summarize(entries.filter((e) => C.inRange(e, C.periodRange(mode, 0, now))));
   const week = sum('week');
+  const month = sum('maand');
+  const st = table(now);
+  const amount = (s, key) => `<p class="amount${s.lost ? ' is-punt' : ''}" data-count="${s.lost}" data-key="${key}">${money(s.lost)}</p>`;
   const card = (title, s, cls, key, extra = '') => `
       <section class="card stat ${cls}">
         <h2>${title}</h2>
-        <p class="amount${s.lost ? ' is-punt' : ''}" data-count="${s.lost}" data-key="${key}">${money(s.lost)}</p>
+        ${amount(s, key)}
         <p class="sub">verloren aan punts</p>
         <ul class="counts">
           <li><span class="dot punt"></span>${plural(s.punts, 'punt', 'punts')}</li>
-          <li><span class="dot pro"></span>${plural(s.pros, 'pro play', 'pro plays')}</li>
+          <li data-pro><span class="dot pro"></span>${plural(s.pros, 'pro play', 'pro plays')}</li>
         </ul>
         ${extra}
       </section>`;
+  const mini = (title, s, key) => `
+      <section class="card stat">
+        <h2>${title}</h2>
+        ${amount(s, key)}
+        <p class="line"><span>${plural(s.punts, 'punt', 'punts')}</span> · <span data-pro>${plural(s.pros, 'pro play', 'pro plays')}</span></p>
+      </section>`;
+  const body = st.active ? `
+      ${tableCard(st)}
+      <div class="stats mini">
+        ${mini('Deze week', week, 'home-week')}
+        ${mini('Deze maand', month, 'home-month')}
+      </div>` : `
+      <div class="stats">
+        ${card('Deze week', week, 'hero', 'home-week', weekStrip(now))}
+        ${card('Deze maand', month, 'month', 'home-month')}
+      </div>
+      <button type="button" class="startbar" data-act="start-session">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+        <span><strong>Start sessie</strong><small>Zet de tiltmeter aan als je gaat zitten</small></span>
+      </button>`;
   return `
-    <div class="home">
+    <div class="home${st.active ? ' at-table' : ''}">
       <header class="top">
         <h1>${ring(week.punts, week.pros)}<span><b>Punt</b> Tracker</span></h1>
         <p class="pill">${dayLabel(C.sessionDay(now))}</p>
       </header>
-      <div class="stats">
-        ${card('Deze week', week, 'hero', 'home-week', weekStrip(now))}
-        ${card('Deze maand', sum('maand'), 'month', 'home-month')}
-      </div>
+      ${body}
       <div class="actions">
+        <a class="big klap" href="#/klap" data-nav>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 3 5 13.5h6L10.5 21 19 10.5h-6z"/></svg>
+          <strong>Klap</strong>
+          <span>Beat of cooler</span>
+        </a>
         <a class="big punt" href="#/punt" data-nav>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5 10 14l3.5-3.5 7 7M20.5 12.5v5h-5"/></svg>
           <strong>Punt</strong>
@@ -235,10 +355,25 @@ function homeView() {
         <a class="big pro" href="#/pro" data-nav>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.2 6.3 6.3 2.2-6.3 2.2-2.2 6.3-2.2-6.3L3.5 12l6.3-2.2z"/></svg>
           <strong>Pro play</strong>
-          <span>Sterke +EV play</span>
+          <span>+EV play</span>
         </a>
       </div>
     </div>`;
+}
+
+// Werkt de meter bij zonder het hele scherm opnieuw te tekenen (elke 20 seconden).
+function refreshTable() {
+  const card = view.querySelector('.table');
+  const st = table();
+  if (!card || !st.active || card.dataset.zone !== st.zone) {
+    render();
+    return;
+  }
+  card.querySelector('.timer').textContent = C.duration(st.minutes);
+  card.querySelector('.read b').textContent = `${st.pct}%`;
+  card.querySelector('.why').textContent = whyLine(st);
+  card.querySelector('.gauge').style.setProperty('--p', st.pct);
+  shown.set('gauge', st.pct);
 }
 
 /* ---------- formulieren ---------- */
@@ -265,11 +400,26 @@ function whenField() {
     </div>`;
 }
 
+function noteField(placeholder, rows = 1, optional = true) {
+  return `
+    <div class="field">
+      <label class="legend" for="note">Notitie${optional ? ' <small>optioneel</small>' : ''}</label>
+      <textarea class="input" id="note" rows="${rows}" placeholder="${placeholder}">${esc(draft.note)}</textarea>
+    </div>`;
+}
+
 function editButtons(tone) {
   return `
     <p class="error" id="form-error" hidden></p>
     <button type="button" class="btn ${tone}" data-act="save">Opslaan</button>
     <button type="button" class="btn ghost" data-act="delete">Verwijderen</button>`;
+}
+
+function formFor(type) {
+  if (type === 'punt') return puntForm();
+  if (type === 'pro') return proForm();
+  if (type === 'klap') return klapForm();
+  return systemForm();
 }
 
 function puntForm() {
@@ -289,11 +439,7 @@ function puntForm() {
       <p class="hint">Wat de fout kostte op het moment van de beslissing, los van hoe de hand afliep.</p>
       <p class="error" id="amount-error" hidden>Kies eerst een bedrag.</p>
     </div>`;
-  const note = `
-    <div class="field">
-      <label class="legend" for="note">Notitie <small>optioneel</small></label>
-      <textarea class="input" id="note" rows="1" placeholder="Wat gebeurde er?">${esc(d.note)}</textarea>
-    </div>`;
+  const note = noteField('Wat gebeurde er?');
   const reason = `
     <div class="field">
       <p class="legend">Reden${edit ? '' : ' <small>tik om op te slaan</small>'}</p>
@@ -320,14 +466,78 @@ function proForm() {
           ${C.KINDS.map(([k, label]) => chip('pick-kind', k, label, d.kind === k, 'pro')).join('')}
         </div>
       </div>
-      <div class="field">
-        <label class="legend" for="note">Notitie</label>
-        <textarea class="input" id="note" rows="4" placeholder="Wat deed je, en waarom?">${esc(d.note)}</textarea>
-      </div>
+      ${noteField('Wat deed je, en waarom?', 4, false)}
       ${edit ? whenField() + editButtons('pro') : `
         <p class="error" id="form-error" hidden></p>
         <button type="button" class="btn pro" data-act="save">Pro play opslaan</button>`}
     </form>`;
+}
+
+function klapForm() {
+  const d = draft;
+  const edit = d.mode === 'edit';
+  const size = `
+    <div class="field">
+      <p class="legend">Hoe hard?${edit ? '' : ' <small>tik om op te slaan</small>'}</p>
+      <div class="chips two tall">
+        ${C.SIZES.map(([k, label]) => chip('pick-size', k, label, d.size === k, 'klap')).join('')}
+      </div>
+    </div>`;
+  return `
+    ${formHead(edit ? 'Klap bewerken' : 'Klap loggen')}
+    <form class="form" novalidate>
+      <p class="hint lead">Een bad beat of cooler: je speelde goed en verloor toch. Het is geen punt, maar het telt wel mee voor je tiltmeter.</p>
+      ${edit ? size + noteField('Wat gebeurde er?') + whenField() + editButtons('klap') : noteField('Wat gebeurde er?') + size}
+    </form>`;
+}
+
+function systemForm() {
+  return `
+    ${formHead(systemLabel(draft))}
+    <form class="form" novalidate>
+      <p class="hint lead">Deze regel heeft de app zelf gelogd. Je kunt het tijdstip aanpassen of de regel verwijderen.</p>
+      ${whenField()}
+      ${editButtons('plain')}
+    </form>`;
+}
+
+function rulesView() {
+  const s = settings;
+  const pick = (key, val, label) => `<button type="button" class="chip rule" data-act="set-rule" data-key="${key}" data-val="${val}" aria-pressed="${s[key] === val}">${label}</button>`;
+  return `
+    ${formHead('Tafelregels')}
+    <div class="form">
+      <p class="hint lead">Deze regels stel je in met een helder hoofd. Aan tafel beslist de meter, niet je gevoel van dat moment.</p>
+      <div class="field">
+        <p class="legend">Stop-loss</p>
+        <div class="chips four">${pick('stopLoss', 2, '2')}${pick('stopLoss', 3, '3')}${pick('stopLoss', 4, '4')}${pick('stopLoss', 0, 'Uit')}</div>
+        <p class="hint">Zoveel stacks kwijt in één sessie betekent stoppen, hoe je je ook voelt.</p>
+      </div>
+      <div class="field">
+        <p class="legend">Maximale sessieduur</p>
+        <div class="chips four">${pick('maxHours', 4, '4 uur')}${pick('maxHours', 6, '6 uur')}${pick('maxHours', 8, '8 uur')}${pick('maxHours', 0, 'Uit')}</div>
+        <p class="hint">De laatste twee uur loopt de meter al op door vermoeidheid.</p>
+      </div>
+      <div class="field">
+        <p class="legend">Gevoeligheid</p>
+        <div class="chips three">${pick('sens', 'streng', 'Streng')}${pick('sens', 'normaal', 'Normaal')}${pick('sens', 'los', 'Los')}</div>
+        <p class="hint">Streng en normaal: een punt uit tilt of een tweede punt in één sessie is direct stop. Los: pas bij de derde punt, en de meter slaat later uit.</p>
+      </div>
+      <div class="field">
+        <label class="legend" for="message">Bericht van jezelf</label>
+        <textarea class="input" id="message" rows="3" maxlength="400" placeholder="Wat wil je tegen jezelf zeggen als de meter op rood staat?">${esc(s.message)}</textarea>
+        <p class="hint">Dit krijg je te zien bij een stopadvies.</p>
+      </div>
+      <div class="field how">
+        <p class="legend">Zo werkt de meter</p>
+        <ul>
+          <li><b>Klap</b> (bad beat of cooler) en <b>punt</b> tellen op. Een stack kwijt telt zwaarder dan een pot.</li>
+          <li>Punten zakken langzaam weg: na 2,5 uur is een klap nog half zo zwaar.</li>
+          <li><b>Oranje</b>: 10 minuten weg van tafel. <b>Rood</b>: sessie voorbij.</li>
+          <li>De app kan je alleen waarschuwen als je hem opent of iets logt. Log dus elke klap meteen.</li>
+        </ul>
+      </div>
+    </div>`;
 }
 
 function autoGrow(el) {
@@ -349,15 +559,8 @@ function amountError() {
   document.getElementById('f-amount').scrollIntoView({ block: 'start' });
 }
 
-function describe(e) {
-  return e.type === 'punt'
-    ? `${money(e.cents)} · ${C.labelOf(C.REASONS, e.reason)}`
-    : C.labelOf(C.KINDS, e.kind);
-}
-
-function addEntry(fields) {
-  const now = Date.now();
-  const entry = { id: newId(), ts: new Date(now).toISOString(), updated: now, ...fields };
+function addEntry(type, fields) {
+  const entry = make(type, fields);
   entries.push(entry);
   if (!persist()) {
     entries.pop();
@@ -365,20 +568,24 @@ function addEntry(fields) {
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   pendingFx = entry;
+  lastAdded = { id: entry.id, at: Date.now() };
   closeForm('#/');
-  toast(`${entry.type === 'punt' ? 'Punt' : 'Pro play'} gelogd: ${describe(entry)}`, {
+  toast(`${NAMES[type]} gelogd: ${describe(entry)}`, {
     label: 'Ongedaan maken',
     run: () => removeEntry(entry.id),
   });
 }
 
 function removeEntry(id) {
-  const i = entries.findIndex((e) => e.id === id);
-  if (i < 0) return null;
-  const [gone] = entries.splice(i, 1);
+  const gone = entries.find((e) => e.id === id);
+  if (!gone) return [];
+  // Een stopadvies dat door deze entry kwam, verdwijnt mee.
+  const removed = entries.filter((e) => e.id === id || (e.type === 'stopadvies' && e.cause === id));
+  entries = entries.filter((e) => !removed.includes(e));
   persist();
   render();
-  return gone;
+  syncAlarm();
+  return removed;
 }
 
 function saveForm() {
@@ -386,8 +593,8 @@ function saveForm() {
   if (d.type === 'punt' && !d.cents) return amountError();
   if (d.type === 'punt' && !d.reason) return formError('Kies een reden.');
   if (d.type === 'pro' && !d.kind) return formError('Kies een type.');
-  const note = d.note.trim();
-  if (d.mode === 'new') return addEntry({ type: 'pro', kind: d.kind, note });
+  const note = (d.note || '').trim();
+  if (d.mode === 'new') return addEntry('pro', { kind: d.kind, note });
 
   const when = new Date(d.when);
   if (!d.when || Number.isNaN(when.getTime())) return formError('Vul een geldig tijdstip in.');
@@ -396,9 +603,10 @@ function saveForm() {
   const before = entries[i];
   // Seconden behouden als het tijdstip niet is aangepast, zodat de volgorde gelijk blijft.
   const ts = d.when === toLocalInput(before.ts) ? before.ts : when.toISOString();
-  const next = { id: before.id, type: before.type, ts, note, updated: Date.now() };
+  const next = { ...before, ts, note, updated: Date.now() };
   if (before.type === 'punt') Object.assign(next, { cents: d.cents, reason: d.reason });
-  else next.kind = d.kind;
+  if (before.type === 'pro') next.kind = d.kind;
+  if (before.type === 'klap') next.size = d.size;
   entries[i] = next;
   if (!persist()) {
     entries[i] = before;
@@ -409,18 +617,211 @@ function saveForm() {
 }
 
 function deleteDraft() {
-  const gone = removeEntry(draft.id);
+  const removed = removeEntry(draft.id);
   closeForm('#/log');
-  if (!gone) return;
-  toast(`${gone.type === 'punt' ? 'Punt' : 'Pro play'} verwijderd`, {
+  if (!removed.length) return;
+  const gone = removed.find((e) => e.id === draft.id);
+  toast(`${NAMES[gone.type] || systemLabel(gone)} verwijderd`, {
     label: 'Ongedaan maken',
     run: () => {
-      if (entries.some((e) => e.id === gone.id)) return;
-      entries.push(gone);
+      for (const e of removed) if (!entries.some((x) => x.id === e.id)) entries.push(e);
       persist();
       render();
     },
   });
+}
+
+/* ---------- sessie en tiltmeter ---------- */
+
+function readSeen() {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSeen(seen) {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    // Niet erg: dan komt het advies hooguit een keer extra.
+  }
+}
+
+// Kijkt of de meter in een hogere zone is gekomen sinds het laatste advies, en toont dat dan.
+function checkTable() {
+  const st = table();
+  if (!st.active) return;
+  const seen = readSeen();
+  const rank = RANK[st.zone];
+  const prev = seen.sid === st.sid ? seen.rank : 0;
+  if (rank !== prev) writeSeen({ sid: st.sid, rank });
+  if (rank <= prev) return;
+  if (st.zone === 'rood' && !st.redAt) {
+    const cause = lastAdded && Date.now() - lastAdded.at < 10000 ? lastAdded.id : undefined;
+    entries.push(make('stopadvies', cause ? { cause } : {}));
+    persist();
+    if (route().name === 'home' && !draft) render();
+  }
+  showAlarm(table());
+}
+
+// Sluit een advies dat niet meer klopt, bv. na "ongedaan maken".
+function syncAlarm() {
+  const st = table();
+  const rank = st.active ? RANK[st.zone] : 0;
+  const seen = readSeen();
+  if (st.active && seen.sid === st.sid && seen.rank > rank) writeSeen({ sid: st.sid, rank });
+  if (alarm && alarm.kind !== 'timer' && rank < alarm.rank) closeAlarm();
+}
+
+function reasonList(st) {
+  return st.reasons.length ? `<ul class="why-list">${st.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : '';
+}
+
+function showAlarm(st) {
+  if (!st.active || st.zone === 'groen') return;
+  const stop = st.zone === 'rood';
+  alarm = { kind: stop ? 'stop' : 'pauze', rank: RANK[st.zone] };
+  alarmEl.dataset.zone = st.zone;
+  alarmEl.innerHTML = stop ? `
+    <div class="rings" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="alarm-in">
+      <p class="eyebrow">Tiltmeter op rood</p>
+      <h1 id="alarm-title">Stop</h1>
+      <p class="lead">Rack je fiches en ga van tafel. Dit is het moment waarop het fout gaat.</p>
+      ${reasonList(st)}
+      ${settings.message.trim() ? `<blockquote><span>Bericht van jezelf</span>${esc(settings.message.trim())}</blockquote>` : ''}
+      <button type="button" class="btn pro" data-act="leave">Ik ga van tafel</button>
+      <button type="button" class="hold" data-hold="ignore"><i></i><span>Houd ingedrukt om toch door te spelen</span></button>
+    </div>` : `
+    <div class="rings" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="alarm-in">
+      <p class="eyebrow">Tiltmeter op oranje</p>
+      <h1 id="alarm-title">Pauze</h1>
+      <p class="lead">Sta op en loop ${C.PAUSE_MINUTES} minuten weg van tafel. Nu, niet na deze orbit.</p>
+      ${reasonList(st)}
+      <button type="button" class="btn amber" data-act="pause">Start pauze van ${C.PAUSE_MINUTES} minuten</button>
+      <button type="button" class="btn ghost" data-act="alarm-close">Niet nu</button>
+    </div>`;
+  openAlarm();
+  FX.buzz(stop ? [80, 60, 80, 60, 160] : [60, 60, 60]);
+}
+
+let clock = 0;
+
+function showTimer(until) {
+  alarm = { kind: 'timer', rank: 1, until };
+  alarmEl.dataset.zone = 'oranje';
+  alarmEl.innerHTML = `
+    <div class="alarm-in">
+      <p class="eyebrow">Pauze</p>
+      <h1 id="alarm-title" class="clock"></h1>
+      <p class="lead" id="alarm-lead">Weg van tafel. Adem rustig. Kijk geen handen terug.</p>
+      <button type="button" class="btn plain" data-act="alarm-close">Terug naar tafel</button>
+      <button type="button" class="btn ghost" data-act="leave">Ik stop voor vandaag</button>
+    </div>`;
+  openAlarm();
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+    const title = document.getElementById('alarm-title');
+    if (!title || !alarm || alarm.kind !== 'timer') return;
+    if (left) {
+      title.textContent = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+      return;
+    }
+    clearInterval(clock);
+    title.textContent = 'Klaar';
+    document.getElementById('alarm-lead').textContent = 'Speel je weer je eigen spel? Zo niet: stop voor vandaag.';
+    FX.buzz([60, 60, 60]);
+  };
+  clearInterval(clock);
+  clock = setInterval(tick, 500);
+  tick();
+}
+
+// Zolang het advies open staat, is de rest van de app niet te bedienen.
+function setInert(on) {
+  view.inert = on;
+  document.querySelector('.tabbar').inert = on;
+}
+
+function openAlarm() {
+  alarmEl.hidden = false;
+  setInert(true);
+  document.body.classList.add('has-alarm');
+  alarmEl.scrollTop = 0;
+}
+
+function closeAlarm() {
+  clearInterval(clock);
+  alarm = null;
+  alarmEl.hidden = true;
+  alarmEl.innerHTML = '';
+  document.body.classList.remove('has-alarm');
+  setInert(false);
+}
+
+function startSession() {
+  if (table().active) return;
+  const start = make('start');
+  entries.push(start);
+  if (!persist()) {
+    entries.pop();
+    return;
+  }
+  shown.delete('gauge');
+  render(true);
+  toast('Sessie gestart. Log elke klap en elke punt.', { label: 'Ongedaan maken', run: () => removeEntry(start.id) });
+  checkTable(); // kort na een zware sessie kan de meter nog hoog staan
+}
+
+function startPause() {
+  const st = table();
+  if (!st.active) return closeAlarm();
+  const pause = make('pauze');
+  entries.push(pause);
+  persist();
+  syncAlarm();
+  if (route().name === 'home' && !draft) render();
+  return showTimer(Date.parse(pause.ts) + C.PAUSE_MINUTES * 60000);
+}
+
+// Sessie stoppen. Na een stopadvies zonder verder verlies telt dat als pro play: discipline.
+function endSession() {
+  const st = table();
+  closeAlarm();
+  if (!st.active) return;
+  const now = Date.now();
+  const followed = Boolean(st.redAt) && st.afterAdvice === 0;
+  const added = [];
+  // De pro play komt vlak voor de stop, zodat hij bij deze sessie hoort.
+  if (followed) added.push(make('pro', { kind: 'discipline', note: 'Van tafel gegaan toen de tiltmeter op rood stond.' }, now - 1));
+  added.push(make('stop', { advice: followed }, now));
+  entries.push(...added);
+  if (!persist()) {
+    entries = entries.filter((e) => !added.includes(e));
+    return;
+  }
+  shown.delete('gauge');
+  if (route().name === 'home' && !draft) {
+    render(true);
+    if (followed) celebrate(added[0]);
+  }
+  toast(followed ? 'Sterk. Sessie gestopt en gelogd als pro play: Discipline.' : `Sessie gestopt na ${C.duration(st.minutes)}.`, {
+    label: 'Ongedaan maken',
+    run: () => {
+      entries = entries.filter((e) => !added.includes(e));
+      persist();
+      render();
+    },
+  });
+}
+
+function ignoreAdvice() {
+  closeAlarm();
+  toast('Je speelt door tegen het stopadvies in. De meter blijft op rood staan.');
 }
 
 /* ---------- overzicht ---------- */
@@ -436,6 +837,27 @@ function firstSessionDay() {
 
 function weekTitle(start) {
   return `Week ${C.isoWeek(start).week}`;
+}
+
+function tableBlock(inPeriod) {
+  const t = C.tableStats(inPeriod);
+  if (!t.sessions) return '';
+  let line = 'Nog geen stopadvies gekregen in deze periode.';
+  if (t.advices && t.puntsAfter) {
+    line = `Na een stopadvies speelde je door en verloor je nog <strong>${money(t.lostAfter)}</strong> aan ${plural(t.puntsAfter, 'punt', 'punts')}.`;
+  } else if (t.advices) {
+    line = `${t.followed} van de ${t.advices} keer opgevolgd. Geen punts meer na een stopadvies.`;
+  }
+  return `
+    <section class="block">
+      <h2>Aan tafel</h2>
+      <div class="tiles">
+        <div class="card tile"><h2>Sessies</h2><p>${t.sessions}</p></div>
+        <div class="card tile"><h2>Klappen</h2><p>${t.klaps}</p></div>
+        <div class="card tile"><h2>Stopadvies</h2><p>${t.advices}</p></div>
+      </div>
+      <p class="readout">${line}</p>
+    </section>`;
 }
 
 function overviewView() {
@@ -518,7 +940,9 @@ function overviewView() {
       ${weekChart(range, now)}
     </section>
 
-    <section class="block">
+    ${tableBlock(inPeriod)}
+
+    <section class="block" id="pro-plays">
       <h2>Pro plays <small>${title.toLowerCase()}</small></h2>
       ${proList}
     </section>`;
@@ -557,19 +981,27 @@ function weekChart(range, now) {
 
 /* ---------- log ---------- */
 
+function entryTitle(e) {
+  if (e.type === 'punt') return `<b>${money(e.cents)}</b> ${C.labelOf(C.REASONS, e.reason)}`;
+  if (e.type === 'pro') return `<b>Pro play</b> ${C.labelOf(C.KINDS, e.kind)}`;
+  if (e.type === 'klap') return `<b>Klap</b> ${C.labelOf(C.SIZES, e.size)}`;
+  return systemLabel(e);
+}
+
 function logView() {
   const groups = C.groupBySessionDay(entries);
   const days = groups.map((g) => {
     const s = C.summarize(g.entries);
-    const meta = [s.punts ? `${money(s.lost)} · ${plural(s.punts, 'punt', 'punts')}` : '', s.pros ? plural(s.pros, 'pro play', 'pro plays') : '']
-      .filter(Boolean).join(' · ');
+    const meta = [
+      s.punts ? `${money(s.lost)} · ${plural(s.punts, 'punt', 'punts')}` : '',
+      s.pros ? `${s.pros} pro` : '',
+      s.klaps ? plural(s.klaps, 'klap', 'klappen') : '',
+    ].filter(Boolean).join(' · ');
     const rows = g.entries.map((e) => `
-      <li><a class="entry ${e.type}" href="#/bewerk/${encodeURIComponent(e.id)}" data-nav>
+      <li><a class="entry ${e.type}${SYSTEM.includes(e.type) ? ' sys' : ''}" href="#/bewerk/${encodeURIComponent(e.id)}" data-nav>
         <span class="when">${fmtTime.format(new Date(e.ts))}</span>
         <span class="body">
-          <span class="title">${e.type === 'punt'
-            ? `<b>${money(e.cents)}</b> ${C.labelOf(C.REASONS, e.reason)}`
-            : `<b>Pro play</b> ${C.labelOf(C.KINDS, e.kind)}`}</span>
+          <span class="title">${entryTitle(e)}</span>
           ${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}
         </span>
         <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7"/></svg>
@@ -595,7 +1027,7 @@ function logView() {
 }
 
 async function exportData() {
-  const payload = { app: 'poker-punt-tracker', version: 1, exported: new Date().toISOString(), entries };
+  const payload = { app: 'poker-punt-tracker', version: 1, exported: new Date().toISOString(), settings, entries };
   const name = `punt-tracker-backup-${C.dayKey(new Date())}.json`;
   const file = new File([JSON.stringify(payload, null, 2)], name, { type: 'application/json' });
   // Op een telefoon is het deelmenu de betrouwbaarste weg naar Bestanden of iCloud.
@@ -620,21 +1052,23 @@ async function exportData() {
 
 async function importData(file) {
   try {
-    const { entries: incoming, skipped } = C.parseBackup(await file.text());
-    const before = entries;
-    const merged = C.mergeEntries(entries, incoming);
+    const data = C.parseBackup(await file.text());
+    const before = { entries, settings };
+    const merged = C.mergeEntries(entries, data.entries);
     entries = merged.entries;
+    // Tafelregels uit de backup alleen overnemen op een leeg toestel.
+    if (data.settings && !before.entries.length) settings = data.settings;
     if (!persist()) {
-      entries = before;
+      ({ entries, settings } = before);
       return;
     }
     render();
     const parts = [`${merged.added} nieuw`, `${merged.updated} bijgewerkt`];
-    if (skipped) parts.push(`${skipped} overgeslagen`);
+    if (data.skipped) parts.push(`${data.skipped} overgeslagen`);
     toast(`Import klaar: ${parts.join(', ')}`, merged.added || merged.updated ? {
       label: 'Ongedaan maken',
       run: () => {
-        entries = before;
+        ({ entries, settings } = before);
         persist();
         render();
       },
@@ -653,7 +1087,7 @@ function toast(message, action) {
   clearTimeout(toastTimer);
   toastRun = action ? action.run : null;
   toastEl.innerHTML = `<span>${esc(message)}</span>${action ? `<button type="button" data-act="toast-action">${esc(action.label)}</button>` : ''}`;
-  const ms = action ? 8000 : 3000;
+  const ms = action ? 8000 : 3500;
   toastEl.style.setProperty('--ms', `${ms}ms`);
   toastEl.hidden = true;
   void toastEl.offsetWidth; // herstart de animatie als er al een toast stond
@@ -684,14 +1118,30 @@ const actions = {
       draft.reason = null;
       return amountError();
     }
-    return addEntry({ type: 'punt', cents: draft.cents, reason: draft.reason, note: draft.note.trim() });
+    return addEntry('punt', { cents: draft.cents, reason: draft.reason, note: draft.note.trim() });
   },
   'pick-kind': (el) => {
     draft.kind = el.dataset.val;
     render();
   },
+  'pick-size': (el) => {
+    draft.size = el.dataset.val;
+    if (draft.mode === 'edit') return render();
+    return addEntry('klap', { size: draft.size, note: draft.note.trim() });
+  },
+  'set-rule': (el) => {
+    const val = el.dataset.val;
+    settings = C.cleanSettings({ ...settings, [el.dataset.key]: /^\d+$/.test(val) ? Number(val) : val });
+    persist();
+    render();
+  },
   save: saveForm,
   delete: deleteDraft,
+  'start-session': startSession,
+  'stop-session': endSession,
+  leave: endSession,
+  pause: startPause,
+  'alarm-close': closeAlarm,
   mode: (el) => {
     Object.assign(ov, { from: MODES.indexOf(ov.mode), mode: el.dataset.val, offset: 0, bar: null });
     render(true);
@@ -731,8 +1181,14 @@ document.addEventListener('click', (e) => {
 });
 
 view.addEventListener('input', (e) => {
-  if (!draft) return;
   const t = e.target;
+  if (t.id === 'message') {
+    settings = C.cleanSettings({ ...settings, message: t.value });
+    persist();
+    autoGrow(t);
+    return;
+  }
+  if (!draft) return;
   if (t.id === 'custom') {
     draft.custom = t.value;
     draft.cents = C.parseAmount(t.value);
@@ -754,6 +1210,30 @@ view.addEventListener('keydown', (e) => {
   }
 });
 
+// Ingedrukt houden: bewust een drempel om tegen een stopadvies in te gaan.
+const HOLD_MS = 2500;
+let holdTimer = 0;
+
+function endHold() {
+  clearTimeout(holdTimer);
+  const btn = alarmEl.querySelector('.hold.holding');
+  if (btn) btn.classList.remove('holding');
+}
+
+alarmEl.addEventListener('pointerdown', (e) => {
+  const btn = e.target.closest('[data-hold]');
+  if (!btn) return;
+  btn.style.setProperty('--hold', `${HOLD_MS}ms`);
+  btn.classList.add('holding');
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => {
+    endHold();
+    ignoreAdvice();
+  }, HOLD_MS);
+});
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) alarmEl.addEventListener(type, endHold);
+alarmEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
 importInput.addEventListener('change', () => {
   const file = importInput.files[0];
   importInput.value = '';
@@ -763,13 +1243,25 @@ importInput.addEventListener('change', () => {
 window.addEventListener('hashchange', onRoute);
 window.addEventListener('storage', (e) => {
   if (e.key !== STORE_KEY) return;
-  entries = loadEntries();
+  ({ entries, settings } = load());
   if (!draft) render();
 });
+
+const onHome = () => route().name === 'home' && !draft;
+
 document.addEventListener('visibilitychange', () => {
-  // Bij terugkomst opnieuw tekenen: de dag of week kan intussen zijn omgeslagen.
-  if (document.visibilityState === 'visible' && !draft) render();
+  // Bij terugkomst opnieuw tekenen: de dag, de week of de meter kan intussen zijn veranderd.
+  if (document.visibilityState !== 'visible') return;
+  if (!draft && route().name !== 'regels') render();
+  if (onHome()) checkTable();
 });
+
+// Tijdens een sessie loopt de klok mee, en kan de maximale duur een advies geven.
+setInterval(() => {
+  if (document.visibilityState !== 'visible' || !onHome() || !table().active) return;
+  refreshTable();
+  if (!alarm) checkTable();
+}, 20000);
 
 onRoute();
 
