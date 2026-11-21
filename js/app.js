@@ -526,7 +526,7 @@ function proForm() {
     <form class="form" novalidate>
       <div class="field">
         <p class="legend">Type</p>
-        <div class="chips two">
+        <div class="chips two big-pick">
           ${(C.isOldKind(d.kind) ? [[d.kind, C.kindLabel(d.kind)], ...C.KINDS] : C.KINDS).map(([k, label]) => chip('pick-kind', k, label, d.kind === k, 'pro')).join('')}
         </div>
       </div>

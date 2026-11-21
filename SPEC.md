@@ -50,4 +50,4 @@ Deze keuzes zijn na de eerste versie gemaakt en gaan boven wat hierboven staat:
 - Goede mental-game-beslissingen leveren XP op, met een combo per sessie, een sessiestreak en levels. Zie de README.
 - Optionele accounts via Supabase (e-mail en wachtwoord, of Google), met synchronisatie tussen toestellen. Zonder account blijft alles lokaal, zoals in de oorspronkelijke spec. Zie de README.
 - Een rondleiding van vijf kaarten bij de eerste keer openen en na inloggen op een nieuw toestel.
-- Pro plays gaan over mental game, niet over pokertechniek: folded when beat, reset after a beat, stayed patient, skipped fancy play, stuck to my stakes, took a break, quit on time. Hero call, thin value, bluff en exploit zijn vervallen; oude entries houden hun naam.
+- Pro plays gaan over mental game, niet over pokertechniek, en het zijn er bewust maar vier: folded when beat, skipped fancy play, reset after a beat, quit on time. Oudere soorten zijn vervallen; oude entries houden hun naam.

@@ -533,6 +533,7 @@ a.btn { display: grid; place-items: center; }
 .chips.two { grid-template-columns: 1fr 1fr; }
 .chips.three { grid-template-columns: repeat(3, 1fr); }
 .chips.two.tall .chip { min-height: 112px; font-size: 20px; border-radius: 22px; }
+.chips.two.big-pick .chip { min-height: 84px; font-size: 18px; border-radius: 20px; }
 .chips.two .chip { min-height: 52px; }
 .chips.two .chip:last-child:nth-child(odd) { grid-column: 1 / -1; }
 

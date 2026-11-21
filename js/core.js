@@ -12,20 +12,21 @@ export const REASONS = [
   ['anders', 'Other'],
 ];
 
-// Een pro play is een sterke mental-game-beslissing, geen pokertechniek.
+// Een pro play is een sterke mental-game-beslissing, geen pokertechniek. Bewust maar vier:
+// de beslissingen die een sessie redden. De rest kan in de notitie.
 export const KINDS = [
   ['hero-fold', 'Folded when beat'],
-  ['reset', 'Reset after a beat'],
-  ['patient', 'Stayed patient'],
   ['no-fancy', 'Skipped fancy play'],
-  ['stakes', 'Stuck to my stakes'],
-  ['break', 'Took a break'],
+  ['reset', 'Reset after a beat'],
   ['discipline', 'Quit on time'],
-  ['anders', 'Other'],
 ];
 
 // Soorten uit eerdere versies: ze blijven leesbaar in het log, maar je kiest ze niet meer.
 const OLD_KINDS = [
+  ['patient', 'Stayed patient'],
+  ['stakes', 'Stuck to my stakes'],
+  ['break', 'Took a break'],
+  ['anders', 'Other'],
   ['hero-call', 'Hero call'],
   ['thin-value', 'Thin value'],
   ['bluff', 'Bluff'],
