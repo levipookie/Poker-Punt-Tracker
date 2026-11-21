@@ -1,13 +1,15 @@
 // Pure rekenlogica: geen DOM, geen opslag. Bedragen altijd in centen.
+// De interface is Engels; de sleutels in de opgeslagen data (tilt, moe, klap, ...) blijven
+// Nederlands, zodat bestaande data en oude backups gewoon blijven werken.
 
 export const REASONS = [
   ['tilt', 'Tilt'],
-  ['verveeld', 'Verveeld'],
-  ['moe', 'Moe'],
+  ['verveeld', 'Bored'],
+  ['moe', 'Tired'],
   ['ego', 'Ego'],
   ['fancy', 'Fancy play'],
-  ['nieuwsgierig', 'Nieuwsgierig'],
-  ['anders', 'Anders'],
+  ['nieuwsgierig', 'Curious'],
+  ['anders', 'Other'],
 ];
 
 export const KINDS = [
@@ -17,13 +19,13 @@ export const KINDS = [
   ['bluff', 'Bluff'],
   ['exploit', 'Exploit'],
   ['discipline', 'Discipline'],
-  ['anders', 'Anders'],
+  ['anders', 'Other'],
 ];
 
 // Een klap is een bad beat of cooler: goed gespeeld en toch verloren.
 export const SIZES = [
-  ['pot', 'Pot kwijt'],
-  ['stack', 'Stack kwijt'],
+  ['pot', 'Pot lost'],
+  ['stack', 'Stack lost'],
 ];
 
 export const QUICK_AMOUNTS = [2000, 5000, 10000, 20000];
@@ -33,7 +35,7 @@ export const DAY_START_HOUR = 6;
 
 export function labelOf(list, key) {
   const hit = list.find(([k]) => k === key);
-  return hit ? hit[1] : 'Anders';
+  return hit ? hit[1] : 'Other';
 }
 
 export function sessionDay(ts) {
@@ -64,15 +66,15 @@ export function dayKey(day) {
   return `${day.getFullYear()}-${p(day.getMonth() + 1)}-${p(day.getDate())}`;
 }
 
-// mode: 'week' | 'maand' | 'alles'. offset 0 = huidige periode, -1 = vorige, enz.
-// Geeft { start, end } terug (end exclusief), of null voor 'alles'.
+// mode: 'week' | 'month' | 'all'. offset 0 = huidige periode, -1 = vorige, enz.
+// Geeft { start, end } terug (end exclusief), of null voor 'all'.
 export function periodRange(mode, offset, now) {
   const today = sessionDay(now);
   if (mode === 'week') {
     const start = addDays(weekStart(today), 7 * offset);
     return { start, end: addDays(start, 7) };
   }
-  if (mode === 'maand') {
+  if (mode === 'month') {
     return {
       start: new Date(today.getFullYear(), today.getMonth() + offset, 1),
       end: new Date(today.getFullYear(), today.getMonth() + offset + 1, 1),
@@ -189,10 +191,10 @@ export function parseBackup(text) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error('Geen geldig JSON-bestand.');
+    throw new Error('Not a valid JSON file.');
   }
   const list = Array.isArray(data) ? data : data && data.entries;
-  if (!Array.isArray(list)) throw new Error('Dit is geen backup van de Punt Tracker.');
+  if (!Array.isArray(list)) throw new Error("This isn't a Punt Tracker backup.");
   const entries = list.map(cleanEntry).filter(Boolean);
   const settings = !Array.isArray(data) && data.settings ? cleanSettings(data.settings) : null;
   return { entries, skipped: list.length - entries.length, settings };
@@ -223,8 +225,11 @@ export const DEFAULT_SETTINGS = {
   stopLoss: 3, // zoveel stacks kwijt in één sessie = stop (0 = uit)
   maxHours: 6, // maximale sessieduur in uren (0 = uit)
   sens: 'normaal', // 'streng' | 'normaal' | 'los'
-  message: 'Je speelt nu niet meer je eigen spel, ook al voelt het niet zo. Normaal fold je gewoon als je beat bent. Sta op.',
+  message: "You're not playing your own game anymore, even if it doesn't feel that way. Normally you just fold when you're beat. Get up.",
 };
+
+// Het standaardbericht van de eerdere Nederlandse versie; wie dat nooit aanpaste krijgt het Engelse.
+const OLD_DEFAULT_MESSAGE = 'Je speelt nu niet meer je eigen spel, ook al voelt het niet zo. Normaal fold je gewoon als je beat bent. Sta op.';
 
 export function cleanSettings(raw) {
   const s = { ...DEFAULT_SETTINGS };
@@ -232,7 +237,7 @@ export function cleanSettings(raw) {
   if ([0, 2, 3, 4].includes(raw.stopLoss)) s.stopLoss = raw.stopLoss;
   if ([0, 4, 6, 8].includes(raw.maxHours)) s.maxHours = raw.maxHours;
   if (['streng', 'normaal', 'los'].includes(raw.sens)) s.sens = raw.sens;
-  if (typeof raw.message === 'string') s.message = raw.message.slice(0, 400);
+  if (typeof raw.message === 'string' && raw.message !== OLD_DEFAULT_MESSAGE) s.message = raw.message.slice(0, 400);
   return s;
 }
 
@@ -254,7 +259,7 @@ function points(e) {
 
 export function duration(minutes) {
   const h = Math.floor(minutes / 60);
-  return h ? `${h}u${String(minutes % 60).padStart(2, '0')}` : `${minutes} min`;
+  return h ? `${h}h${String(minutes % 60).padStart(2, '0')}` : `${minutes} min`;
 }
 
 // Knipt de entries van één sessiedag (oplopend gesorteerd) in sessies.
@@ -303,21 +308,21 @@ export function evaluate(dayEntries, session, t, settings) {
   const maxPunts = settings.sens === 'los' ? 3 : 2;
 
   const stop = [];
-  if (tilt && settings.sens !== 'los') stop.push('Je logde net zelf een punt uit tilt');
-  if (punts >= maxPunts) stop.push(`${punts} punts in deze sessie`);
-  if (settings.stopLoss && stacks >= settings.stopLoss) stop.push(`Stop-loss: ${stacks} stacks kwijt`);
-  if (settings.maxHours && hours >= settings.maxHours) stop.push(`${duration(minutes)} aan tafel, je maximum is ${settings.maxHours} uur`);
+  if (tilt && settings.sens !== 'los') stop.push('You just logged a tilt punt yourself');
+  if (punts >= maxPunts) stop.push(`${punts} punts this session`);
+  if (settings.stopLoss && stacks >= settings.stopLoss) stop.push(`Stop-loss: ${stacks} stacks lost`);
+  if (settings.maxHours && hours >= settings.maxHours) stop.push(`${duration(minutes)} at the table, your max is ${settings.maxHours} hours`);
 
   const context = [];
-  if (klaps) context.push(`${klaps} ${klaps === 1 ? 'klap' : 'klappen'}${stacks ? `, waarvan ${stacks}× je stack` : ''}`);
+  if (klaps) context.push(`${klaps} ${klaps === 1 ? 'hit' : 'hits'}${stacks ? ` (${stacks}× your stack)` : ''}`);
   if (punts && !stop.some((r) => r.includes('punt'))) context.push(`${punts} ${punts === 1 ? 'punt' : 'punts'}`);
-  if (settings.maxHours && hours >= settings.maxHours - 2 && hours < settings.maxHours) context.push(`al ${duration(minutes)} aan tafel`);
+  if (settings.maxHours && hours >= settings.maxHours - 2 && hours < settings.maxHours) context.push(`${duration(minutes)} at the table already`);
   // Wat er eerder vandaag gebeurde telt nog mee, ook als dat in een vorige sessie was.
   let carried = 0;
   for (const e of dayEntries) {
     if (at(e) < Date.parse(session.start)) carried += points(e) * 0.5 ** ((t - at(e)) / HALF_LIFE_MS);
   }
-  if (carried >= 20) context.push('je bent nog niet bekomen van je vorige sessie');
+  if (carried >= 20) context.push('still rattled from your previous session');
 
   let zone = 'groen';
   if (score >= ORANGE * factor || (tilt && settings.sens === 'los')) zone = 'oranje';

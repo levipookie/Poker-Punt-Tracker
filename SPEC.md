@@ -39,3 +39,11 @@ Ik wil mezelf accountable houden. Aan tafel log ik elke "punt" (een play waarvan
 - Test de app in een telefoon-viewport: voeg entries toe en reken de totalen na.
 - Schrijf een korte README met hoe ik de app via GitHub Pages op mijn telefoon zet.
 - Commit en push naar main.
+
+## Latere beslissingen
+
+Deze keuzes zijn na de eerste versie gemaakt en gaan boven wat hierboven staat:
+
+- De interface is Engels, niet Nederlands. Bedragen blijven in euro's en de week begint op maandag.
+- De app heeft een moderne look met beweging en effecten, in plaats van "geen overbodige animaties".
+- Er is een tiltmeter bij gekomen: je logt ook bad beats en coolers ("Hit"), en de app adviseert een pauze of stoppen. Zie de README.

@@ -2,7 +2,7 @@
 
 Een kleine mobiele web-app (PWA) om aan de pokertafel elke **punt** en elke **pro play** te loggen. Aan het eind van de week of maand zie je wat je punts hebben gekost en welke goede plays je hebt gemaakt.
 
-Statische site zonder build-stap: HTML, CSS en vanilla JS. Geen backend, geen account. Alle data staat in `localStorage` op je eigen toestel en de app werkt volledig offline.
+De interface is Engels. Statische site zonder build-stap: HTML, CSS en vanilla JS. Geen backend, geen account. Alle data staat in `localStorage` op je eigen toestel en de app werkt volledig offline.
 
 ## Op je telefoon zetten via GitHub Pages
 
@@ -21,22 +21,22 @@ Open de app daarna één keer met internet aan. Vanaf dat moment werkt hij ook z
 
 Tilt bouwt zich op zonder dat je het merkt. Daarom telt de app mee in plaats van op je gevoel te vertrouwen.
 
-- Tik **Start sessie** als je gaat zitten. Vergeet je dat, dan start de eerste klap of punt de sessie vanzelf.
-- Log elke **klap** (bad beat of cooler: goed gespeeld, toch verloren) als *Pot kwijt* of *Stack kwijt*. Dat zijn twee tikken.
-- Klappen, punts en speeltijd tellen op tot een stand van 0 tot 100%. Wat langer geleden is, weegt minder.
+- Tik **Start session** als je gaat zitten. Vergeet je dat, dan start de eerste hit of punt de sessie vanzelf.
+- Log elke **Hit** (bad beat of cooler: goed gespeeld, toch verloren) als *Pot lost* of *Stack lost*. Dat zijn twee tikken.
+- Hits, punts en speeltijd tellen op tot een stand van 0 tot 100%. Wat langer geleden is, weegt minder.
 - **Oranje**: de app zegt dat je 10 minuten van tafel moet en telt de pauze af.
 - **Rood**: stopadvies, met je eigen bericht aan jezelf erbij. Toch doorspelen kan alleen door een knop 2,5 seconde ingedrukt te houden.
 - Direct rood, ongeacht de stand: een punt uit tilt, een tweede punt in één sessie, je stop-loss in stacks, of je maximale sessieduur.
 - Ga je van tafel na een stopadvies, dan logt de app dat als pro play (Discipline). In het overzicht zie je wat doorspelen ná een stopadvies je heeft gekost.
 
-De grenzen stel je in onder **Regels** (op de meter): stop-loss, maximale sessieduur, gevoeligheid en je bericht aan jezelf.
+De grenzen stel je in onder **Rules** (op de meter): stop-loss, maximale sessieduur, gevoeligheid en je bericht aan jezelf.
 
 Let op: een web-app kan geen melding sturen als hij dicht is. De meter waarschuwt dus alleen op het moment dat je iets logt of de app opent.
 
 ## Goed om te weten
 
 - **Je data staat alleen op dat ene toestel.** Op iPhone heeft de app op het beginscherm een eigen opslag, los van Safari. Installeer dus eerst en begin dan pas met loggen.
-- **Maak af en toe een backup**: tabblad **Log** → onderaan **Exporteer JSON**. Met **Importeer JSON** zet je een backup terug (ook op een nieuw toestel). Importeren voegt samen en overschrijft niets wat nieuwer is.
+- **Maak af en toe een backup**: tabblad **Log** → onderaan **Export JSON**. Met **Import JSON** zet je een backup terug (ook op een nieuw toestel). Importeren voegt samen en overschrijft niets wat nieuwer is.
 - **Sessiedag tot 06:00**: een entry om 02:00 telt bij de vorige dag, en dus ook bij de week en maand van die dag. Weken lopen van maandag tot en met zondag.
 - **Bedrag van een punt** is wat de fout kostte op het moment van de beslissing, los van hoe de hand afliep.
 

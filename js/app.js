@@ -13,11 +13,11 @@ let draft = null; // het formulier dat open staat
 let cameFromApp = false; // true als het scherm via een tik in de app is geopend
 let logScroll = 0;
 const ov = { mode: 'week', offset: 0, bar: null, from: 0 };
-const MODES = ['week', 'maand', 'alles'];
-const TABS = ['home', 'overzicht', 'log'];
+const MODES = ['week', 'month', 'all'];
+const TABS = ['home', 'overview', 'log'];
 const SYSTEM = ['start', 'stop', 'pauze', 'stopadvies']; // entries die de app zelf aanmaakt
 const RANK = { groen: 0, oranje: 1, rood: 2 };
-const ZONE = { groen: 'Scherp', oranje: 'Pauze', rood: 'Stop' };
+const ZONE = { groen: 'Sharp', oranje: 'Break', rood: 'Stop' };
 const shown = new Map(); // laatst getoonde waarde per teller, voor het oplopen
 let pendingFx = null; // entry die net is gelogd en nog gevierd moet worden
 let lastAdded = null; // { id, at } van de laatst gelogde entry, als oorzaak van een stopadvies
@@ -43,7 +43,7 @@ function persist() {
     localStorage.setItem(STORE_KEY, JSON.stringify({ version: 1, entries, settings }));
     return true;
   } catch {
-    toast('Opslaan mislukt: de opslag van dit toestel is vol of geblokkeerd.');
+    toast("Couldn't save: this device's storage is full or blocked.");
     return false;
   }
 }
@@ -60,18 +60,18 @@ const table = (now = Date.now()) => C.tableState(entries, now, settings);
 
 /* ---------- weergavehulpjes ---------- */
 
-const eur0 = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
-const eur2 = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
+const eur0 = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const eur2 = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' });
 const money = (cents) => (cents % 100 === 0 ? eur0 : eur2).format(cents / 100);
 
-const fmtDay = new Intl.DateTimeFormat('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
-const fmtDayYear = new Intl.DateTimeFormat('nl-NL', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-const fmtShort = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short' });
-const fmtMonth = new Intl.DateTimeFormat('nl-NL', { month: 'long', year: 'numeric' });
-const fmtTime = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' });
+const fmtDay = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtDayYear = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const fmtShort = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+const fmtMonth = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' });
+const fmtTime = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 const thisYear = () => C.sessionDay(Date.now()).getFullYear();
-const dayLabel = (day) => (day.getFullYear() === thisYear() ? fmtDay : fmtDayYear).format(day);
+const dayLabel = (day) => (day.getFullYear() === thisYear() ? fmtDay : fmtDayYear).format(day).replace(/,/g, '');
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -88,14 +88,14 @@ function toLocalInput(ts) {
 }
 
 function plainAmount(cents) {
-  return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2).replace('.', ',');
+  return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
 }
 
 function systemLabel(e) {
-  if (e.type === 'start') return 'Sessie gestart';
-  if (e.type === 'stop') return e.advice ? 'Van tafel op stopadvies' : 'Sessie gestopt';
-  if (e.type === 'pauze') return 'Pauze genomen';
-  return 'Stopadvies van de tiltmeter';
+  if (e.type === 'start') return 'Session started';
+  if (e.type === 'stop') return e.advice ? 'Left the table on a stop warning' : 'Session ended';
+  if (e.type === 'pauze') return 'Break taken';
+  return 'Stop warning from the tilt meter';
 }
 
 function describe(e) {
@@ -105,14 +105,14 @@ function describe(e) {
   return systemLabel(e);
 }
 
-const NAMES = { punt: 'Punt', pro: 'Pro play', klap: 'Klap' };
+const NAMES = { punt: 'Punt', pro: 'Pro play', klap: 'Hit' };
 
 /* ---------- routing ---------- */
 
 function route() {
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
-  if (['punt', 'pro', 'klap', 'regels', 'overzicht', 'log'].includes(name)) return { name };
-  if (name === 'bewerk') return { name, id: decodeURIComponent(arg || '') };
+  if (['punt', 'pro', 'hit', 'rules', 'overview', 'log'].includes(name)) return { name };
+  if (name === 'edit') return { name, id: decodeURIComponent(arg || '') };
   return { name: 'home' };
 }
 
@@ -123,9 +123,9 @@ function onRoute() {
     draft = { mode: 'new', type: 'punt', cents: null, custom: '', reason: null, note: '' };
   } else if (r.name === 'pro') {
     draft = { mode: 'new', type: 'pro', kind: null, note: '' };
-  } else if (r.name === 'klap') {
+  } else if (r.name === 'hit') {
     draft = { mode: 'new', type: 'klap', size: null, note: '' };
-  } else if (r.name === 'bewerk') {
+  } else if (r.name === 'edit') {
     const e = entries.find((x) => x.id === r.id);
     if (!e) {
       location.replace('#/log');
@@ -156,7 +156,7 @@ function closeForm(fallback = '#/') {
 
 function render(animate = false) {
   const r = route();
-  const full = Boolean(draft) || r.name === 'regels';
+  const full = Boolean(draft) || r.name === 'rules';
   document.body.classList.toggle('is-form', full);
   document.body.dataset.tone = draft ? draft.type : '';
   const nav = document.querySelector('.tabbar');
@@ -167,8 +167,8 @@ function render(animate = false) {
   }
   view.classList.toggle('animate', animate && FX.motionOk());
   if (draft) view.innerHTML = formFor(draft.type);
-  else if (r.name === 'regels') view.innerHTML = rulesView();
-  else if (r.name === 'overzicht') view.innerHTML = overviewView();
+  else if (r.name === 'rules') view.innerHTML = rulesView();
+  else if (r.name === 'overview') view.innerHTML = overviewView();
   else if (r.name === 'log') view.innerHTML = logView();
   else view.innerHTML = homeView();
   for (const area of view.querySelectorAll('textarea')) autoGrow(area);
@@ -231,7 +231,7 @@ function celebrate(entry) {
 function weekStrip(now) {
   const today = C.sessionDay(now);
   const start = C.weekStart(today);
-  const cells = ['M', 'D', 'W', 'D', 'V', 'Z', 'Z'].map((letter, i) => {
+  const cells = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((letter, i) => {
     const day = C.addDays(start, i);
     const key = C.dayKey(day);
     const list = entries.filter((e) => C.dayKey(C.sessionDay(e.ts)) === key);
@@ -255,9 +255,9 @@ function ring(punts, pros) {
 }
 
 function whyLine(st) {
-  if (st.redAt) return `Stopadvies sinds ${fmtTime.format(new Date(st.redAt))}. Ga van tafel.`;
+  if (st.redAt) return `Stop warning since ${fmtTime.format(new Date(st.redAt))}. Time to go.`;
   if (st.reasons.length) return st.reasons.join(' · ');
-  return 'Nog niets aan de hand. Log elke klap, dan houdt de meter het bij.';
+  return 'All good so far. Log every hit and the meter keeps track.';
 }
 
 // De tiltmeter van de lopende sessie.
@@ -266,7 +266,7 @@ function tableCard(st) {
   return `
     <section class="card table" data-zone="${st.zone}">
       <header>
-        <h2>Aan tafel</h2>
+        <h2>At the table</h2>
         <p class="timer">${C.duration(st.minutes)}</p>
       </header>
       <div class="gauge" style="--p:${from}" data-p="${st.pct}">
@@ -285,13 +285,13 @@ function tableCard(st) {
         </svg>
         <div class="read">
           <strong>${ZONE[st.zone]}</strong>
-          <span>tiltmeter <b>${st.pct}%</b></span>
+          <span>tilt meter <b>${st.pct}%</b></span>
         </div>
       </div>
       <p class="why">${esc(whyLine(st))}</p>
       <div class="pair">
-        <button type="button" class="btn plain${st.zone === 'rood' ? ' pro' : ''}" data-act="stop-session">${st.zone === 'rood' ? 'Ik ga van tafel' : 'Stop sessie'}</button>
-        <a class="btn plain" href="#/regels" data-nav>Regels</a>
+        <button type="button" class="btn plain${st.zone === 'rood' ? ' pro' : ''}" data-act="stop-session">${st.zone === 'rood' ? 'Leave the table' : 'End session'}</button>
+        <a class="btn plain" href="#/rules" data-nav>Rules</a>
       </div>
     </section>`;
 }
@@ -300,14 +300,14 @@ function homeView() {
   const now = Date.now();
   const sum = (mode) => C.summarize(entries.filter((e) => C.inRange(e, C.periodRange(mode, 0, now))));
   const week = sum('week');
-  const month = sum('maand');
+  const month = sum('month');
   const st = table(now);
   const amount = (s, key) => `<p class="amount${s.lost ? ' is-punt' : ''}" data-count="${s.lost}" data-key="${key}">${money(s.lost)}</p>`;
   const card = (title, s, cls, key, extra = '') => `
       <section class="card stat ${cls}">
         <h2>${title}</h2>
         ${amount(s, key)}
-        <p class="sub">verloren aan punts</p>
+        <p class="sub">lost to punts</p>
         <ul class="counts">
           <li><span class="dot punt"></span>${plural(s.punts, 'punt', 'punts')}</li>
           <li data-pro><span class="dot pro"></span>${plural(s.pros, 'pro play', 'pro plays')}</li>
@@ -323,16 +323,16 @@ function homeView() {
   const body = st.active ? `
       ${tableCard(st)}
       <div class="stats mini">
-        ${mini('Deze week', week, 'home-week')}
-        ${mini('Deze maand', month, 'home-month')}
+        ${mini('This week', week, 'home-week')}
+        ${mini('This month', month, 'home-month')}
       </div>` : `
       <div class="stats">
-        ${card('Deze week', week, 'hero', 'home-week', weekStrip(now))}
-        ${card('Deze maand', month, 'month', 'home-month')}
+        ${card('This week', week, 'hero', 'home-week', weekStrip(now))}
+        ${card('This month', month, 'month', 'home-month')}
       </div>
       <button type="button" class="startbar" data-act="start-session">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>
-        <span><strong>Start sessie</strong><small>Zet de tiltmeter aan als je gaat zitten</small></span>
+        <span><strong>Start session</strong><small>Turn on the tilt meter when you sit down</small></span>
       </button>`;
   return `
     <div class="home${st.active ? ' at-table' : ''}">
@@ -342,15 +342,15 @@ function homeView() {
       </header>
       ${body}
       <div class="actions">
-        <a class="big klap" href="#/klap" data-nav>
+        <a class="big klap" href="#/hit" data-nav>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 3 5 13.5h6L10.5 21 19 10.5h-6z"/></svg>
-          <strong>Klap</strong>
-          <span>Beat of cooler</span>
+          <strong>Hit</strong>
+          <span>Beat or cooler</span>
         </a>
         <a class="big punt" href="#/punt" data-nav>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5 10 14l3.5-3.5 7 7M20.5 12.5v5h-5"/></svg>
           <strong>Punt</strong>
-          <span>Slechte play</span>
+          <span>Bad play</span>
         </a>
         <a class="big pro" href="#/pro" data-nav>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.2 6.3 6.3 2.2-6.3 2.2-2.2 6.3-2.2-6.3L3.5 12l6.3-2.2z"/></svg>
@@ -381,7 +381,7 @@ function refreshTable() {
 function formHead(title) {
   return `
     <header class="formhead">
-      <button type="button" class="back" data-act="close" aria-label="Terug">
+      <button type="button" class="back" data-act="close" aria-label="Back">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 8 12l6.5 7"/></svg>
       </button>
       <h1>${title}</h1>
@@ -395,7 +395,7 @@ function chip(act, val, label, on, tone) {
 function whenField() {
   return `
     <div class="field">
-      <label class="legend" for="when">Tijdstip</label>
+      <label class="legend" for="when">Time</label>
       <input class="input" id="when" type="datetime-local" value="${esc(draft.when)}">
     </div>`;
 }
@@ -403,7 +403,7 @@ function whenField() {
 function noteField(placeholder, rows = 1, optional = true) {
   return `
     <div class="field">
-      <label class="legend" for="note">Notitie${optional ? ' <small>optioneel</small>' : ''}</label>
+      <label class="legend" for="note">Note${optional ? ' <small>optional</small>' : ''}</label>
       <textarea class="input" id="note" rows="${rows}" placeholder="${placeholder}">${esc(draft.note)}</textarea>
     </div>`;
 }
@@ -411,8 +411,8 @@ function noteField(placeholder, rows = 1, optional = true) {
 function editButtons(tone) {
   return `
     <p class="error" id="form-error" hidden></p>
-    <button type="button" class="btn ${tone}" data-act="save">Opslaan</button>
-    <button type="button" class="btn ghost" data-act="delete">Verwijderen</button>`;
+    <button type="button" class="btn ${tone}" data-act="save">Save</button>
+    <button type="button" class="btn ghost" data-act="delete">Delete</button>`;
 }
 
 function formFor(type) {
@@ -427,28 +427,28 @@ function puntForm() {
   const edit = d.mode === 'edit';
   const amount = `
     <div class="field" id="f-amount">
-      <p class="legend">Bedrag</p>
+      <p class="legend">Amount</p>
       <div class="chips four">
         ${C.QUICK_AMOUNTS.map((c) => chip('pick-amount', c, money(c), !d.custom && d.cents === c, 'punt')).join('')}
       </div>
       <label class="money">
         <span>€</span>
         <input id="custom" inputmode="decimal" autocomplete="off" enterkeyhint="done"
-          placeholder="Ander bedrag" aria-label="Ander bedrag in euro" value="${esc(d.custom)}">
+          placeholder="Other amount" aria-label="Other amount in euros" value="${esc(d.custom)}">
       </label>
-      <p class="hint">Wat de fout kostte op het moment van de beslissing, los van hoe de hand afliep.</p>
-      <p class="error" id="amount-error" hidden>Kies eerst een bedrag.</p>
+      <p class="hint">What the mistake cost at the moment you decided, no matter how the hand ran out.</p>
+      <p class="error" id="amount-error" hidden>Pick an amount first.</p>
     </div>`;
-  const note = noteField('Wat gebeurde er?');
+  const note = noteField('What happened?');
   const reason = `
     <div class="field">
-      <p class="legend">Reden${edit ? '' : ' <small>tik om op te slaan</small>'}</p>
+      <p class="legend">Reason${edit ? '' : ' <small>tap to save</small>'}</p>
       <div class="chips two">
         ${C.REASONS.map(([k, label]) => chip('pick-reason', k, label, d.reason === k, 'punt')).join('')}
       </div>
     </div>`;
   return `
-    ${formHead(edit ? 'Punt bewerken' : 'Punt loggen')}
+    ${formHead(edit ? 'Edit punt' : 'Log punt')}
     <form class="form" novalidate>
       ${edit ? amount + reason + note + whenField() + editButtons('punt') : amount + note + reason}
     </form>`;
@@ -458,7 +458,7 @@ function proForm() {
   const d = draft;
   const edit = d.mode === 'edit';
   return `
-    ${formHead(edit ? 'Pro play bewerken' : 'Pro play loggen')}
+    ${formHead(edit ? 'Edit pro play' : 'Log pro play')}
     <form class="form" novalidate>
       <div class="field">
         <p class="legend">Type</p>
@@ -466,10 +466,10 @@ function proForm() {
           ${C.KINDS.map(([k, label]) => chip('pick-kind', k, label, d.kind === k, 'pro')).join('')}
         </div>
       </div>
-      ${noteField('Wat deed je, en waarom?', 4, false)}
+      ${noteField('What did you do, and why?', 4, false)}
       ${edit ? whenField() + editButtons('pro') : `
         <p class="error" id="form-error" hidden></p>
-        <button type="button" class="btn pro" data-act="save">Pro play opslaan</button>`}
+        <button type="button" class="btn pro" data-act="save">Save pro play</button>`}
     </form>`;
 }
 
@@ -478,16 +478,16 @@ function klapForm() {
   const edit = d.mode === 'edit';
   const size = `
     <div class="field">
-      <p class="legend">Hoe hard?${edit ? '' : ' <small>tik om op te slaan</small>'}</p>
+      <p class="legend">How bad?${edit ? '' : ' <small>tap to save</small>'}</p>
       <div class="chips two tall">
         ${C.SIZES.map(([k, label]) => chip('pick-size', k, label, d.size === k, 'klap')).join('')}
       </div>
     </div>`;
   return `
-    ${formHead(edit ? 'Klap bewerken' : 'Klap loggen')}
+    ${formHead(edit ? 'Edit hit' : 'Log hit')}
     <form class="form" novalidate>
-      <p class="hint lead">Een bad beat of cooler: je speelde goed en verloor toch. Het is geen punt, maar het telt wel mee voor je tiltmeter.</p>
-      ${edit ? size + noteField('Wat gebeurde er?') + whenField() + editButtons('klap') : noteField('Wat gebeurde er?') + size}
+      <p class="hint lead">A bad beat or cooler: you played it right and lost anyway. It's not a punt, but it does count toward your tilt meter.</p>
+      ${edit ? size + noteField('What happened?') + whenField() + editButtons('klap') : noteField('What happened?') + size}
     </form>`;
 }
 
@@ -495,7 +495,7 @@ function systemForm() {
   return `
     ${formHead(systemLabel(draft))}
     <form class="form" novalidate>
-      <p class="hint lead">Deze regel heeft de app zelf gelogd. Je kunt het tijdstip aanpassen of de regel verwijderen.</p>
+      <p class="hint lead">The app logged this line itself. You can change the time or delete it.</p>
       ${whenField()}
       ${editButtons('plain')}
     </form>`;
@@ -505,36 +505,36 @@ function rulesView() {
   const s = settings;
   const pick = (key, val, label) => `<button type="button" class="chip rule" data-act="set-rule" data-key="${key}" data-val="${val}" aria-pressed="${s[key] === val}">${label}</button>`;
   return `
-    ${formHead('Tafelregels')}
+    ${formHead('Table rules')}
     <div class="form">
-      <p class="hint lead">Deze regels stel je in met een helder hoofd. Aan tafel beslist de meter, niet je gevoel van dat moment.</p>
+      <p class="hint lead">Set these rules with a clear head. At the table the meter decides, not how you feel in the moment.</p>
       <div class="field">
         <p class="legend">Stop-loss</p>
-        <div class="chips four">${pick('stopLoss', 2, '2')}${pick('stopLoss', 3, '3')}${pick('stopLoss', 4, '4')}${pick('stopLoss', 0, 'Uit')}</div>
-        <p class="hint">Zoveel stacks kwijt in één sessie betekent stoppen, hoe je je ook voelt.</p>
+        <div class="chips four">${pick('stopLoss', 2, '2')}${pick('stopLoss', 3, '3')}${pick('stopLoss', 4, '4')}${pick('stopLoss', 0, 'Off')}</div>
+        <p class="hint">Lose this many stacks in one session and you stop, however you feel.</p>
       </div>
       <div class="field">
-        <p class="legend">Maximale sessieduur</p>
-        <div class="chips four">${pick('maxHours', 4, '4 uur')}${pick('maxHours', 6, '6 uur')}${pick('maxHours', 8, '8 uur')}${pick('maxHours', 0, 'Uit')}</div>
-        <p class="hint">De laatste twee uur loopt de meter al op door vermoeidheid.</p>
+        <p class="legend">Max session length</p>
+        <div class="chips four">${pick('maxHours', 4, '4 h')}${pick('maxHours', 6, '6 h')}${pick('maxHours', 8, '8 h')}${pick('maxHours', 0, 'Off')}</div>
+        <p class="hint">During the last two hours the meter already climbs from fatigue.</p>
       </div>
       <div class="field">
-        <p class="legend">Gevoeligheid</p>
-        <div class="chips three">${pick('sens', 'streng', 'Streng')}${pick('sens', 'normaal', 'Normaal')}${pick('sens', 'los', 'Los')}</div>
-        <p class="hint">Streng en normaal: een punt uit tilt of een tweede punt in één sessie is direct stop. Los: pas bij de derde punt, en de meter slaat later uit.</p>
+        <p class="legend">Sensitivity</p>
+        <div class="chips three">${pick('sens', 'streng', 'Strict')}${pick('sens', 'normaal', 'Normal')}${pick('sens', 'los', 'Loose')}</div>
+        <p class="hint">Strict and normal: a tilt punt or a second punt in one session is an instant stop. Loose: only at the third punt, and the meter reacts later.</p>
       </div>
       <div class="field">
-        <label class="legend" for="message">Bericht van jezelf</label>
-        <textarea class="input" id="message" rows="3" maxlength="400" placeholder="Wat wil je tegen jezelf zeggen als de meter op rood staat?">${esc(s.message)}</textarea>
-        <p class="hint">Dit krijg je te zien bij een stopadvies.</p>
+        <label class="legend" for="message">Note to self</label>
+        <textarea class="input" id="message" rows="3" maxlength="400" placeholder="What do you want to tell yourself when the meter hits red?">${esc(s.message)}</textarea>
+        <p class="hint">You'll see this with every stop warning.</p>
       </div>
       <div class="field how">
-        <p class="legend">Zo werkt de meter</p>
+        <p class="legend">How the meter works</p>
         <ul>
-          <li><b>Klap</b> (bad beat of cooler) en <b>punt</b> tellen op. Een stack kwijt telt zwaarder dan een pot.</li>
-          <li>Punten zakken langzaam weg: na 2,5 uur is een klap nog half zo zwaar.</li>
-          <li><b>Oranje</b>: 10 minuten weg van tafel. <b>Rood</b>: sessie voorbij.</li>
-          <li>De app kan je alleen waarschuwen als je hem opent of iets logt. Log dus elke klap meteen.</li>
+          <li>Every <b>hit</b> (bad beat or cooler) and every <b>punt</b> adds up. Losing a stack counts more than losing a pot.</li>
+          <li>Points fade slowly: after 2.5 hours a hit weighs half as much.</li>
+          <li><b>Orange</b>: 10 minutes away from the table. <b>Red</b>: session over.</li>
+          <li>The app can only warn you when you open it or log something. So log every hit right away.</li>
         </ul>
       </div>
     </div>`;
@@ -570,8 +570,8 @@ function addEntry(type, fields) {
   pendingFx = entry;
   lastAdded = { id: entry.id, at: Date.now() };
   closeForm('#/');
-  toast(`${NAMES[type]} gelogd: ${describe(entry)}`, {
-    label: 'Ongedaan maken',
+  toast(`${NAMES[type]} logged: ${describe(entry)}`, {
+    label: 'Undo',
     run: () => removeEntry(entry.id),
   });
 }
@@ -591,13 +591,13 @@ function removeEntry(id) {
 function saveForm() {
   const d = draft;
   if (d.type === 'punt' && !d.cents) return amountError();
-  if (d.type === 'punt' && !d.reason) return formError('Kies een reden.');
-  if (d.type === 'pro' && !d.kind) return formError('Kies een type.');
+  if (d.type === 'punt' && !d.reason) return formError('Pick a reason.');
+  if (d.type === 'pro' && !d.kind) return formError('Pick a type.');
   const note = (d.note || '').trim();
   if (d.mode === 'new') return addEntry('pro', { kind: d.kind, note });
 
   const when = new Date(d.when);
-  if (!d.when || Number.isNaN(when.getTime())) return formError('Vul een geldig tijdstip in.');
+  if (!d.when || Number.isNaN(when.getTime())) return formError('Enter a valid time.');
   const i = entries.findIndex((e) => e.id === d.id);
   if (i < 0) return closeForm('#/log');
   const before = entries[i];
@@ -613,7 +613,7 @@ function saveForm() {
     return undefined;
   }
   closeForm('#/log');
-  return toast('Wijziging opgeslagen');
+  return toast('Change saved');
 }
 
 function deleteDraft() {
@@ -621,8 +621,8 @@ function deleteDraft() {
   closeForm('#/log');
   if (!removed.length) return;
   const gone = removed.find((e) => e.id === draft.id);
-  toast(`${NAMES[gone.type] || systemLabel(gone)} verwijderd`, {
-    label: 'Ongedaan maken',
+  toast(`${NAMES[gone.type] || systemLabel(gone)} deleted`, {
+    label: 'Undo',
     run: () => {
       for (const e of removed) if (!entries.some((x) => x.id === e.id)) entries.push(e);
       persist();
@@ -688,22 +688,22 @@ function showAlarm(st) {
   alarmEl.innerHTML = stop ? `
     <div class="rings" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="alarm-in">
-      <p class="eyebrow">Tiltmeter op rood</p>
+      <p class="eyebrow">Tilt meter on red</p>
       <h1 id="alarm-title">Stop</h1>
-      <p class="lead">Rack je fiches en ga van tafel. Dit is het moment waarop het fout gaat.</p>
+      <p class="lead">Rack up and leave the table. This is the moment it goes wrong.</p>
       ${reasonList(st)}
-      ${settings.message.trim() ? `<blockquote><span>Bericht van jezelf</span>${esc(settings.message.trim())}</blockquote>` : ''}
-      <button type="button" class="btn pro" data-act="leave">Ik ga van tafel</button>
-      <button type="button" class="hold" data-hold="ignore"><i></i><span>Houd ingedrukt om toch door te spelen</span></button>
+      ${settings.message.trim() ? `<blockquote><span>Note to self</span>${esc(settings.message.trim())}</blockquote>` : ''}
+      <button type="button" class="btn pro" data-act="leave">I'm leaving the table</button>
+      <button type="button" class="hold" data-hold="ignore"><i></i><span>Hold to keep playing anyway</span></button>
     </div>` : `
     <div class="rings" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="alarm-in">
-      <p class="eyebrow">Tiltmeter op oranje</p>
-      <h1 id="alarm-title">Pauze</h1>
-      <p class="lead">Sta op en loop ${C.PAUSE_MINUTES} minuten weg van tafel. Nu, niet na deze orbit.</p>
+      <p class="eyebrow">Tilt meter on orange</p>
+      <h1 id="alarm-title">Break</h1>
+      <p class="lead">Get up and walk away from the table for ${C.PAUSE_MINUTES} minutes. Now, not after this orbit.</p>
       ${reasonList(st)}
-      <button type="button" class="btn amber" data-act="pause">Start pauze van ${C.PAUSE_MINUTES} minuten</button>
-      <button type="button" class="btn ghost" data-act="alarm-close">Niet nu</button>
+      <button type="button" class="btn amber" data-act="pause">Start ${C.PAUSE_MINUTES}-minute break</button>
+      <button type="button" class="btn ghost" data-act="alarm-close">Not now</button>
     </div>`;
   openAlarm();
   FX.buzz(stop ? [80, 60, 80, 60, 160] : [60, 60, 60]);
@@ -716,11 +716,11 @@ function showTimer(until) {
   alarmEl.dataset.zone = 'oranje';
   alarmEl.innerHTML = `
     <div class="alarm-in">
-      <p class="eyebrow">Pauze</p>
+      <p class="eyebrow">Break</p>
       <h1 id="alarm-title" class="clock"></h1>
-      <p class="lead" id="alarm-lead">Weg van tafel. Adem rustig. Kijk geen handen terug.</p>
-      <button type="button" class="btn plain" data-act="alarm-close">Terug naar tafel</button>
-      <button type="button" class="btn ghost" data-act="leave">Ik stop voor vandaag</button>
+      <p class="lead" id="alarm-lead">Away from the table. Breathe. Don't replay hands.</p>
+      <button type="button" class="btn plain" data-act="alarm-close">Back to the table</button>
+      <button type="button" class="btn ghost" data-act="leave">I'm done for today</button>
     </div>`;
   openAlarm();
   const tick = () => {
@@ -732,8 +732,8 @@ function showTimer(until) {
       return;
     }
     clearInterval(clock);
-    title.textContent = 'Klaar';
-    document.getElementById('alarm-lead').textContent = 'Speel je weer je eigen spel? Zo niet: stop voor vandaag.';
+    title.textContent = 'Done';
+    document.getElementById('alarm-lead').textContent = "Are you playing your own game again? If not, call it a day.";
     FX.buzz([60, 60, 60]);
   };
   clearInterval(clock);
@@ -773,7 +773,7 @@ function startSession() {
   }
   shown.delete('gauge');
   render(true);
-  toast('Sessie gestart. Log elke klap en elke punt.', { label: 'Ongedaan maken', run: () => removeEntry(start.id) });
+  toast('Session started. Log every hit and every punt.', { label: 'Undo', run: () => removeEntry(start.id) });
   checkTable(); // kort na een zware sessie kan de meter nog hoog staan
 }
 
@@ -797,7 +797,7 @@ function endSession() {
   const followed = Boolean(st.redAt) && st.afterAdvice === 0;
   const added = [];
   // De pro play komt vlak voor de stop, zodat hij bij deze sessie hoort.
-  if (followed) added.push(make('pro', { kind: 'discipline', note: 'Van tafel gegaan toen de tiltmeter op rood stond.' }, now - 1));
+  if (followed) added.push(make('pro', { kind: 'discipline', note: 'Left the table when the tilt meter was on red.' }, now - 1));
   added.push(make('stop', { advice: followed }, now));
   entries.push(...added);
   if (!persist()) {
@@ -809,8 +809,8 @@ function endSession() {
     render(true);
     if (followed) celebrate(added[0]);
   }
-  toast(followed ? 'Sterk. Sessie gestopt en gelogd als pro play: Discipline.' : `Sessie gestopt na ${C.duration(st.minutes)}.`, {
-    label: 'Ongedaan maken',
+  toast(followed ? 'Strong. Session ended and logged as a pro play: Discipline.' : `Session ended after ${C.duration(st.minutes)}.`, {
+    label: 'Undo',
     run: () => {
       entries = entries.filter((e) => !added.includes(e));
       persist();
@@ -821,7 +821,7 @@ function endSession() {
 
 function ignoreAdvice() {
   closeAlarm();
-  toast('Je speelt door tegen het stopadvies in. De meter blijft op rood staan.');
+  toast("You're playing on against the stop warning. The meter stays on red.");
 }
 
 /* ---------- overzicht ---------- */
@@ -842,19 +842,19 @@ function weekTitle(start) {
 function tableBlock(inPeriod) {
   const t = C.tableStats(inPeriod);
   if (!t.sessions) return '';
-  let line = 'Nog geen stopadvies gekregen in deze periode.';
+  let line = 'No stop warning in this period yet.';
   if (t.advices && t.puntsAfter) {
-    line = `Na een stopadvies speelde je door en verloor je nog <strong>${money(t.lostAfter)}</strong> aan ${plural(t.puntsAfter, 'punt', 'punts')}.`;
+    line = `After a stop warning you kept playing and lost another <strong>${money(t.lostAfter)}</strong> on ${plural(t.puntsAfter, 'punt', 'punts')}.`;
   } else if (t.advices) {
-    line = `${t.followed} van de ${t.advices} keer opgevolgd. Geen punts meer na een stopadvies.`;
+    line = `Followed ${t.followed} out of ${t.advices}. No punts after a stop warning.`;
   }
   return `
     <section class="block">
-      <h2>Aan tafel</h2>
+      <h2>At the table</h2>
       <div class="tiles">
-        <div class="card tile"><h2>Sessies</h2><p>${t.sessions}</p></div>
-        <div class="card tile"><h2>Klappen</h2><p>${t.klaps}</p></div>
-        <div class="card tile"><h2>Stopadvies</h2><p>${t.advices}</p></div>
+        <div class="card tile"><h2>Sessions</h2><p>${t.sessions}</p></div>
+        <div class="card tile"><h2>Hits</h2><p>${t.klaps}</p></div>
+        <div class="card tile"><h2>Warnings</h2><p>${t.advices}</p></div>
       </div>
       <p class="readout">${line}</p>
     </section>`;
@@ -867,19 +867,19 @@ function overviewView() {
   const s = C.summarize(inPeriod);
   const first = firstSessionDay();
 
-  let title = 'Alles';
-  let sub = first ? `sinds ${fmtShort.format(first)} ${first.getFullYear()}` : 'nog niets gelogd';
+  let title = 'All time';
+  let sub = first ? `since ${fmtShort.format(first)} ${first.getFullYear()}` : 'nothing logged yet';
   if (ov.mode === 'week') {
     title = weekTitle(range.start);
     sub = spanLabel(range.start, C.addDays(range.end, -1));
-  } else if (ov.mode === 'maand') {
+  } else if (ov.mode === 'month') {
     title = fmtMonth.format(range.start);
-    sub = ov.offset === 0 ? 'deze maand' : '';
+    sub = ov.offset === 0 ? 'this month' : '';
   }
   const canPrev = Boolean(range && first && range.start > first);
   const canNext = Boolean(range && ov.offset < 0);
 
-  const seg = [['week', 'Week'], ['maand', 'Maand'], ['alles', 'Alles']]
+  const seg = [['week', 'Week'], ['month', 'Month'], ['all', 'All']]
     .map(([k, label]) => `<button type="button" data-act="mode" data-val="${k}" aria-pressed="${ov.mode === k}">${label}</button>`)
     .join('');
 
@@ -893,50 +893,50 @@ function overviewView() {
           </div>
           <div class="meter"><span style="width:${Math.max((r.cents / maxReason) * 100, 1.5)}%"></span></div>
         </li>`).join('')}</ul>`
-    : '<p class="empty">Geen punts in deze periode.</p>';
+    : '<p class="empty">No punts in this period.</p>';
 
   const pros = inPeriod.filter((e) => e.type === 'pro').sort((a, b) => new Date(b.ts) - new Date(a.ts));
   const proList = pros.length
     ? `<ul class="list">${pros.map((e) => `
-        <li><a class="entry pro" href="#/bewerk/${encodeURIComponent(e.id)}" data-nav>
+        <li><a class="entry pro" href="#/edit/${encodeURIComponent(e.id)}" data-nav>
           <span class="when">${fmtShort.format(C.sessionDay(e.ts))}</span>
           <span class="body">
             <span class="title">${C.labelOf(C.KINDS, e.kind)}</span>
             ${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}
           </span>
         </a></li>`).join('')}</ul>`
-    : '<p class="empty">Geen pro plays in deze periode.</p>';
+    : '<p class="empty">No pro plays in this period.</p>';
 
   return `
-    <header class="top"><h1>Overzicht</h1></header>
-    <div class="seg" role="group" aria-label="Periode" style="--i:${ov.from}" data-i="${MODES.indexOf(ov.mode)}">${seg}</div>
+    <header class="top"><h1>Overview</h1></header>
+    <div class="seg" role="group" aria-label="Period" style="--i:${ov.from}" data-i="${MODES.indexOf(ov.mode)}">${seg}</div>
     <div class="period">
-      <button type="button" data-act="prev" aria-label="Vorige periode"${canPrev ? '' : ' disabled'}>
+      <button type="button" data-act="prev" aria-label="Previous period"${canPrev ? '' : ' disabled'}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 8 12l6.5 7"/></svg>
       </button>
       <div><strong>${title}</strong><span>${sub}</span></div>
-      <button type="button" data-act="next" aria-label="Volgende periode"${canNext ? '' : ' disabled'}>
+      <button type="button" data-act="next" aria-label="Next period"${canNext ? '' : ' disabled'}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7"/></svg>
       </button>
     </div>
 
     <section class="card stat hero">
-      <h2>Totaal verloren</h2>
+      <h2>Total lost</h2>
       <p class="amount${s.lost ? ' is-punt' : ''}" data-count="${s.lost}" data-key="ov-total">${money(s.lost)}</p>
     </section>
     <div class="tiles">
       <div class="card tile"><h2>Punts</h2><p>${s.punts}</p></div>
-      <div class="card tile"><h2>Gem. per punt</h2><p>${s.punts ? money(s.avg) : '–'}</p></div>
+      <div class="card tile"><h2>Avg per punt</h2><p>${s.punts ? money(s.avg) : '–'}</p></div>
       <div class="card tile"><h2>Pro plays</h2><p>${s.pros}</p></div>
     </div>
 
     <section class="block">
-      <h2>Per reden</h2>
+      <h2>By reason</h2>
       ${reasons}
     </section>
 
     <section class="block">
-      <h2>Verloren per week <small>laatste 8 weken</small></h2>
+      <h2>Lost per week <small>last 8 weeks</small></h2>
       ${weekChart(range, now)}
     </section>
 
@@ -972,7 +972,7 @@ function weekChart(range, now) {
   }).join('');
   const w = weeks[sel];
   return `
-    <div class="chart" role="group" aria-label="Verloren aan punts per week">${cols}</div>
+    <div class="chart" role="group" aria-label="Lost to punts per week">${cols}</div>
     <p class="readout">
       <strong>${weekTitle(w.start)}</strong> · ${spanLabel(w.start, C.addDays(w.end, -1))}:
       ${money(w.lost)} · ${plural(w.punts, 'punt', 'punts')}
@@ -984,7 +984,7 @@ function weekChart(range, now) {
 function entryTitle(e) {
   if (e.type === 'punt') return `<b>${money(e.cents)}</b> ${C.labelOf(C.REASONS, e.reason)}`;
   if (e.type === 'pro') return `<b>Pro play</b> ${C.labelOf(C.KINDS, e.kind)}`;
-  if (e.type === 'klap') return `<b>Klap</b> ${C.labelOf(C.SIZES, e.size)}`;
+  if (e.type === 'klap') return `<b>Hit</b> ${C.labelOf(C.SIZES, e.size)}`;
   return systemLabel(e);
 }
 
@@ -995,10 +995,10 @@ function logView() {
     const meta = [
       s.punts ? `${money(s.lost)} · ${plural(s.punts, 'punt', 'punts')}` : '',
       s.pros ? `${s.pros} pro` : '',
-      s.klaps ? plural(s.klaps, 'klap', 'klappen') : '',
+      s.klaps ? plural(s.klaps, 'hit', 'hits') : '',
     ].filter(Boolean).join(' · ');
     const rows = g.entries.map((e) => `
-      <li><a class="entry ${e.type}${SYSTEM.includes(e.type) ? ' sys' : ''}" href="#/bewerk/${encodeURIComponent(e.id)}" data-nav>
+      <li><a class="entry ${e.type}${SYSTEM.includes(e.type) ? ' sys' : ''}" href="#/edit/${encodeURIComponent(e.id)}" data-nav>
         <span class="when">${fmtTime.format(new Date(e.ts))}</span>
         <span class="body">
           <span class="title">${entryTitle(e)}</span>
@@ -1015,13 +1015,13 @@ function logView() {
 
   return `
     <header class="top"><h1>Log</h1></header>
-    ${days || '<p class="empty big-empty">Nog niets gelogd. Je eerste punt of pro play verschijnt hier.</p>'}
+    ${days || '<p class="empty big-empty">Nothing logged yet. Your first punt or pro play shows up here.</p>'}
     <section class="block backup">
       <h2>Backup</h2>
-      <p class="hint">Je data staat alleen op dit toestel. Exporteer af en toe een backup.</p>
+      <p class="hint">Your data only lives on this device. Export a backup now and then.</p>
       <div class="pair">
-        <button type="button" class="btn plain" data-act="export"${entries.length ? '' : ' disabled'}>Exporteer JSON</button>
-        <button type="button" class="btn plain" data-act="import">Importeer JSON</button>
+        <button type="button" class="btn plain" data-act="export"${entries.length ? '' : ' disabled'}>Export JSON</button>
+        <button type="button" class="btn plain" data-act="import">Import JSON</button>
       </div>
     </section>`;
 }
@@ -1047,7 +1047,7 @@ async function exportData() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
-  toast(`Backup gedownload (${plural(entries.length, 'entry', 'entries')})`);
+  toast(`Backup downloaded (${plural(entries.length, 'entry', 'entries')})`);
 }
 
 async function importData(file) {
@@ -1063,10 +1063,10 @@ async function importData(file) {
       return;
     }
     render();
-    const parts = [`${merged.added} nieuw`, `${merged.updated} bijgewerkt`];
-    if (data.skipped) parts.push(`${data.skipped} overgeslagen`);
-    toast(`Import klaar: ${parts.join(', ')}`, merged.added || merged.updated ? {
-      label: 'Ongedaan maken',
+    const parts = [`${merged.added} new`, `${merged.updated} updated`];
+    if (data.skipped) parts.push(`${data.skipped} skipped`);
+    toast(`Import done: ${parts.join(', ')}`, merged.added || merged.updated ? {
+      label: 'Undo',
       run: () => {
         ({ entries, settings } = before);
         persist();
@@ -1074,7 +1074,7 @@ async function importData(file) {
       },
     } : null);
   } catch (err) {
-    toast(err.message || 'Importeren mislukt.');
+    toast(err.message || 'Import failed.');
   }
 }
 
@@ -1252,7 +1252,7 @@ const onHome = () => route().name === 'home' && !draft;
 document.addEventListener('visibilitychange', () => {
   // Bij terugkomst opnieuw tekenen: de dag, de week of de meter kan intussen zijn veranderd.
   if (document.visibilityState !== 'visible') return;
-  if (!draft && route().name !== 'regels') render();
+  if (!draft && route().name !== 'rules') render();
   if (onHome()) checkTable();
 });
 

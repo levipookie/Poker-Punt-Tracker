@@ -1,8 +1,8 @@
 {
   "name": "Poker Punt Tracker",
   "short_name": "Punts",
-  "description": "Punt & pro play tracker voor live poker.",
-  "lang": "nl",
+  "description": "Punt & pro play tracker for live poker.",
+  "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
