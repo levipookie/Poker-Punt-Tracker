@@ -33,6 +33,17 @@ De grenzen stel je in onder **Rules** (op de meter): stop-loss, maximale sessied
 
 Let op: een web-app kan geen melding sturen als hij dicht is. De meter waarschuwt dus alleen op het moment dat je iets logt of de app opent.
 
+## Voortgang: XP, combo, streak en levels
+
+Goede mental-game-beslissingen leveren XP op. Rechtsboven op het startscherm staan je streak, je level en een balkje naar het volgende level; tik erop voor het scherm **Progress**.
+
+- **XP**: +100 voor van tafel gaan op een stop warning, +40 voor de pauze nemen op oranje, +40 voor een sessie van minstens een half uur netjes afsluiten, +30 per pro play, +10 per gelogde hit.
+- **Combo**: elke winst op rij binnen één sessie maakt hits en pro plays meer waard, tot ×3. Een punt zet de combo terug op ×1.
+- **Streak**: sessies op rij waarin je je aan je regels hield. Alleen doorspelen na een stop warning breekt hem. Een punt loggen breekt hem nooit, zodat eerlijk loggen je niets kost.
+- **Levels**: tien rangen, van Tilt Monkey tot Stone Buddha. Daarna tel je door in levelnummers.
+
+Alles wordt uit je log berekend. Een entry bewerken, verwijderen of importeren past je XP dus vanzelf aan.
+
 ## Goed om te weten
 
 - **Je data staat alleen op dat ene toestel.** Op iPhone heeft de app op het beginscherm een eigen opslag, los van Safari. Installeer dus eerst en begin dan pas met loggen.

@@ -6,6 +6,7 @@ const SEEN_KEY = 'ppt.seen';
 const view = document.getElementById('view');
 const toastEl = document.getElementById('toast');
 const alarmEl = document.getElementById('alarm');
+const cheerEl = document.getElementById('cheer');
 const importInput = document.getElementById('import-file');
 
 let { entries, settings } = load();
@@ -22,6 +23,7 @@ const shown = new Map(); // laatst getoonde waarde per teller, voor het oplopen
 let pendingFx = null; // entry die net is gelogd en nog gevierd moet worden
 let lastAdded = null; // { id, at } van de laatst gelogde entry, als oorzaak van een stopadvies
 let alarm = null; // het schermvullende advies dat open staat: { kind, rank, until }
+let cheer = null; // nieuw level dat nog gevierd moet worden, zodra er geen advies open staat
 
 /* ---------- opslag ---------- */
 
@@ -57,6 +59,15 @@ function make(type, fields = {}, at = Date.now()) {
 }
 
 const table = (now = Date.now()) => C.tableState(entries, now, settings);
+const prog = (now = Date.now()) => C.progress(entries, now);
+const num = (n) => n.toLocaleString('en-IE');
+
+// Vergelijkt de voortgang van voor en na een actie: hoeveel XP kwam erbij, en is er een level bij?
+function reward(before) {
+  const after = prog();
+  if (after.level > before.level) cheer = after;
+  return { gained: after.xp - before.xp, after };
+}
 
 /* ---------- weergavehulpjes ---------- */
 
@@ -111,7 +122,7 @@ const NAMES = { punt: 'Punt', pro: 'Pro play', klap: 'Hit' };
 
 function route() {
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
-  if (['punt', 'pro', 'hit', 'rules', 'overview', 'log'].includes(name)) return { name };
+  if (['punt', 'pro', 'hit', 'rules', 'progress', 'overview', 'log'].includes(name)) return { name };
   if (name === 'edit') return { name, id: decodeURIComponent(arg || '') };
   return { name: 'home' };
 }
@@ -140,9 +151,14 @@ function onRoute() {
   if (!fx && !draft) shown.clear();
   render(true);
   window.scrollTo(0, r.name === 'log' ? logScroll : 0);
-  if (fx) celebrate(fx);
-  // Laat eerst het cijfer oplopen; daarna pas het eventuele advies.
-  if (r.name === 'home') setTimeout(checkTable, fx && FX.motionOk() ? 800 : 0);
+  if (fx) celebrate(fx.entry, fx.gained);
+  // Laat eerst het cijfer oplopen; daarna pas het eventuele advies, en als laatste een nieuw level.
+  if (r.name === 'home') {
+    setTimeout(() => {
+      checkTable();
+      flushCheer();
+    }, fx && FX.motionOk() ? 800 : 0);
+  }
 }
 
 function closeForm(fallback = '#/') {
@@ -156,7 +172,7 @@ function closeForm(fallback = '#/') {
 
 function render(animate = false) {
   const r = route();
-  const full = Boolean(draft) || r.name === 'rules';
+  const full = Boolean(draft) || r.name === 'rules' || r.name === 'progress';
   document.body.classList.toggle('is-form', full);
   document.body.dataset.tone = draft ? draft.type : '';
   const nav = document.querySelector('.tabbar');
@@ -168,6 +184,7 @@ function render(animate = false) {
   view.classList.toggle('animate', animate && FX.motionOk());
   if (draft) view.innerHTML = formFor(draft.type);
   else if (r.name === 'rules') view.innerHTML = rulesView();
+  else if (r.name === 'progress') view.innerHTML = progressView();
   else if (r.name === 'overview') view.innerHTML = overviewView();
   else if (r.name === 'log') view.innerHTML = logView();
   else view.innerHTML = homeView();
@@ -195,15 +212,20 @@ function afterRender() {
     shown.set('gauge', Number(gauge.dataset.p));
     requestAnimationFrame(() => gauge.style.setProperty('--p', gauge.dataset.p));
   }
+  for (const bar of view.querySelectorAll('.xpbar i')) {
+    shown.set('xp', Number(bar.dataset.w));
+    requestAnimationFrame(() => bar.style.setProperty('--w', bar.dataset.w));
+  }
   const seg = view.querySelector('.seg');
   if (seg) requestAnimationFrame(() => seg.style.setProperty('--i', seg.dataset.i));
 }
 
 // Na het loggen: vonken en een zwevend label bij het cijfer dat verandert.
-function celebrate(entry) {
+function celebrate(entry, gained = 0) {
   const amount = view.querySelector('[data-key="home-week"]');
   if (!amount) return;
   const card = amount.closest('.card');
+  if (gained) FX.pulse(view.querySelector('.prog'), 'hit-xp');
   if (entry.type === 'punt') {
     const box = amount.getBoundingClientRect();
     FX.floatLabel(`+${money(entry.cents)}`, Math.min(box.right + 10, window.innerWidth - 110), box.top + 4, 'punt');
@@ -212,7 +234,7 @@ function celebrate(entry) {
     FX.buzz(40);
   } else if (entry.type === 'pro') {
     const box = card.querySelector('[data-pro]').getBoundingClientRect();
-    FX.floatLabel('+1 pro play', Math.min(box.right + 12, window.innerWidth - 130), box.top + 2, 'pro');
+    FX.floatLabel(gained ? `+${gained} XP` : '+1 pro play', Math.min(box.right + 12, window.innerWidth - 130), box.top + 2, 'pro');
     FX.burst(box.left + 14, box.top + box.height / 2, { tone: 'pro', count: 44 });
     FX.pulse(card, 'hit-pro');
     FX.buzz([15, 50, 15]);
@@ -220,6 +242,7 @@ function celebrate(entry) {
     const meter = view.querySelector('.table');
     if (!meter) return;
     const box = meter.querySelector('.gauge').getBoundingClientRect();
+    if (gained) FX.floatLabel(`+${gained} XP`, box.right - 30, box.top + box.height * 0.3, 'klap');
     FX.burst(box.left + box.width / 2, box.top + box.height * 0.55, { tone: 'klap', count: entry.size === 'stack' ? 46 : 30 });
     FX.pulse(meter, 'hit-klap');
     FX.buzz(entry.size === 'stack' ? [30, 40, 30] : 30);
@@ -243,6 +266,8 @@ function weekStrip(now) {
   return `<ol class="weekstrip" aria-hidden="true">${cells.join('')}</ol>`;
 }
 
+const FLAME = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.4 2.5c.6 3.1-.9 4.9-2.4 6.6C8.5 10.8 7 12.5 7 15c0 2.9 2.2 5.5 5 5.5s5-2.4 5-5.5c0-1.7-.6-3.2-1.6-4.4-.3 1.2-1 2.1-2 2.6.6-3.6-.1-7.5-1-10.7z"/></svg>';
+
 // Het logo: een ring die de verhouding punts / pro plays van deze week laat zien.
 function ring(punts, pros) {
   const total = punts + pros;
@@ -261,12 +286,13 @@ function whyLine(st) {
 }
 
 // De tiltmeter van de lopende sessie.
-function tableCard(st) {
+function tableCard(st, mult) {
   const from = shown.has('gauge') ? shown.get('gauge') : 0;
   return `
     <section class="card table" data-zone="${st.zone}">
       <header>
         <h2>At the table</h2>
+        ${mult > 1 ? `<p class="combo">Combo ×${mult}</p>` : ''}
         <p class="timer">${C.duration(st.minutes)}</p>
       </header>
       <div class="gauge" style="--p:${from}" data-p="${st.pct}">
@@ -302,6 +328,7 @@ function homeView() {
   const week = sum('week');
   const month = sum('month');
   const st = table(now);
+  const p = prog(now);
   const amount = (s, key) => `<p class="amount${s.lost ? ' is-punt' : ''}" data-count="${s.lost}" data-key="${key}">${money(s.lost)}</p>`;
   const card = (title, s, cls, key, extra = '') => `
       <section class="card stat ${cls}">
@@ -321,7 +348,7 @@ function homeView() {
         <p class="line"><span>${plural(s.punts, 'punt', 'punts')}</span> · <span data-pro>${plural(s.pros, 'pro play', 'pro plays')}</span></p>
       </section>`;
   const body = st.active ? `
-      ${tableCard(st)}
+      ${tableCard(st, p.mult)}
       <div class="stats mini">
         ${mini('This week', week, 'home-week')}
         ${mini('This month', month, 'home-month')}
@@ -338,7 +365,11 @@ function homeView() {
     <div class="home${st.active ? ' at-table' : ''}">
       <header class="top">
         <h1>${ring(week.punts, week.pros)}<span><b>Punt</b> Tracker</span></h1>
-        <p class="pill">${dayLabel(C.sessionDay(now))}</p>
+        <a class="prog" href="#/progress" data-nav aria-label="Level ${p.level}, ${p.title}. Streak ${p.streak}. Open progress">
+          <span class="streak${p.streak ? '' : ' cold'}">${FLAME}${p.streak}</span>
+          <span class="lv">Lv ${p.level}</span>
+          <span class="xpbar"><i style="--w:${shown.has('xp') ? shown.get('xp') : 0}" data-w="${p.pct}"></i></span>
+        </a>
       </header>
       ${body}
       <div class="actions">
@@ -540,6 +571,58 @@ function rulesView() {
     </div>`;
 }
 
+function progressView() {
+  const p = prog();
+  const recent = p.events.slice(-6).reverse();
+  const rows = recent.length
+    ? `<ul class="list wins">${recent.map((ev) => `
+        <li>
+          <span class="when">${fmtShort.format(C.sessionDay(ev.ts))}</span>
+          <span class="what">${esc(ev.label)}${ev.mult > 1 ? ` <small>combo ×${ev.mult}</small>` : ''}</span>
+          <b>+${ev.xp}</b>
+        </li>`).join('')}</ul>`
+    : '<p class="empty">No wins yet. Your first good decision shows up here.</p>';
+  const ladder = C.LEVELS.map((l) => `
+        <li class="${l.level === Math.min(p.level, C.LEVELS.length) ? 'now' : p.level > l.level ? 'done' : ''}" style="--n:${l.level}">
+          <span class="n">${l.level}</span><span class="t">${l.title}</span><span class="x">${num(l.xp)} XP</span>
+        </li>`).join('');
+  return `
+    ${formHead('Progress')}
+    <div class="form">
+      <section class="card levelcard">
+        <p class="eyebrow">Level ${p.level}</p>
+        <p class="rank">${p.title}</p>
+        <div class="xpbar wide"><i style="--w:${shown.has('xp') ? shown.get('xp') : 0}" data-w="${p.pct}"></i></div>
+        <p class="sub"><b>${num(p.xp)} XP</b> · ${num(p.toNext)} to ${p.nextTitle === p.title ? `level ${p.level + 1}` : p.nextTitle}</p>
+      </section>
+      <div class="tiles">
+        <div class="card tile"><h2>Streak</h2><p>${p.streak}</p></div>
+        <div class="card tile"><h2>Best streak</h2><p>${p.bestStreak}</p></div>
+        <div class="card tile"><h2>Best combo</h2><p>×${p.bestMult}</p></div>
+      </div>
+      <div class="field">
+        <p class="legend">Recent wins</p>
+        ${rows}
+      </div>
+      <div class="field how">
+        <p class="legend">How you earn XP</p>
+        <ul>
+          <li><b>+${C.XP.leave}</b> leaving the table on a stop warning.</li>
+          <li><b>+${C.XP.break}</b> taking the break when the meter turns orange.</li>
+          <li><b>+${C.XP.clean}</b> a clean exit: ending a session of ${C.CLEAN_MINUTES} minutes or more without a stop warning.</li>
+          <li><b>+${C.XP.pro}</b> every pro play.</li>
+          <li><b>+${C.XP.hit}</b> every hit you log instead of steaming over it.</li>
+          <li><b>Combo</b>: each win in a row in one session adds ×0.5 to hits and pro plays, up to ×${C.MAX_MULT}. A punt resets it.</li>
+          <li><b>Streak</b>: sessions in a row where you played by your rules. Only playing on after a stop warning breaks it. Logging a punt never does.</li>
+        </ul>
+      </div>
+      <div class="field">
+        <p class="legend">Levels</p>
+        <ol class="ladder">${ladder}</ol>
+      </div>
+    </div>`;
+}
+
 function autoGrow(el) {
   el.style.height = 'auto';
   el.style.height = `${el.scrollHeight + 2}px`;
@@ -560,6 +643,7 @@ function amountError() {
 }
 
 function addEntry(type, fields) {
+  const before = prog();
   const entry = make(type, fields);
   entries.push(entry);
   if (!persist()) {
@@ -567,10 +651,14 @@ function addEntry(type, fields) {
     return;
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  pendingFx = entry;
+  const { gained } = reward(before);
+  pendingFx = { entry, gained };
   lastAdded = { id: entry.id, at: Date.now() };
   closeForm('#/');
-  toast(`${NAMES[type]} logged: ${describe(entry)}`, {
+  const bits = [`${NAMES[type]} logged: ${describe(entry)}`];
+  if (gained) bits.push(`+${gained} XP`);
+  else if (type === 'punt' && before.combo > 0) bits.push('combo lost');
+  toast(bits.join(' · '), {
     label: 'Undo',
     run: () => removeEntry(entry.id),
   });
@@ -711,12 +799,12 @@ function showAlarm(st) {
 
 let clock = 0;
 
-function showTimer(until) {
+function showTimer(until, gained = 0) {
   alarm = { kind: 'timer', rank: 1, until };
   alarmEl.dataset.zone = 'oranje';
   alarmEl.innerHTML = `
     <div class="alarm-in">
-      <p class="eyebrow">Break</p>
+      <p class="eyebrow">Break${gained ? ` · +${gained} XP` : ''}</p>
       <h1 id="alarm-title" class="clock"></h1>
       <p class="lead" id="alarm-lead">Away from the table. Breathe. Don't replay hands.</p>
       <button type="button" class="btn plain" data-act="alarm-close">Back to the table</button>
@@ -761,6 +849,48 @@ function closeAlarm() {
   alarmEl.innerHTML = '';
   document.body.classList.remove('has-alarm');
   setInert(false);
+  flushCheer();
+}
+
+// Nieuw level: een eigen schermvullend moment, maar nooit over een advies heen.
+function flushCheer() {
+  if (!cheer || alarm || !cheerEl.hidden) return;
+  const p = cheer;
+  cheer = null;
+  cheerEl.innerHTML = `
+    <div class="rings" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="alarm-in">
+      <p class="eyebrow">Level up</p>
+      <h1 id="cheer-title">Level ${p.level}</h1>
+      <p class="rank">${p.title}</p>
+      <p class="lead">${num(p.toNext)} XP to ${p.nextTitle === p.title ? `level ${p.level + 1}` : p.nextTitle}.</p>
+      <button type="button" class="btn klap" data-act="cheer-close">Keep it up</button>
+    </div>`;
+  cheerEl.hidden = false;
+  cheerEl.scrollTop = 0;
+  setInert(true);
+  document.body.classList.add('has-alarm');
+  const x = window.innerWidth / 2;
+  FX.burst(x, window.innerHeight * 0.34, { tone: 'klap', count: 60 });
+  setTimeout(() => FX.burst(x, window.innerHeight * 0.34, { tone: 'pro', count: 50 }), 220);
+  FX.buzz([40, 40, 40, 40, 140]);
+}
+
+function closeCheer() {
+  cheerEl.hidden = true;
+  cheerEl.innerHTML = '';
+  document.body.classList.remove('has-alarm');
+  setInert(false);
+}
+
+// XP die niet bij een entry op het scherm hoort (sessie afgesloten): label bij de voortgangsknop.
+function popXp(gained) {
+  const pill = view.querySelector('.prog');
+  if (!pill || !gained) return;
+  const box = pill.getBoundingClientRect();
+  FX.floatLabel(`+${gained} XP`, box.left, box.bottom + 26, 'pro');
+  FX.burst(box.left + box.width / 2, box.bottom, { tone: 'pro', count: 32 });
+  FX.pulse(pill, 'hit-xp');
 }
 
 function startSession() {
@@ -780,12 +910,14 @@ function startSession() {
 function startPause() {
   const st = table();
   if (!st.active) return closeAlarm();
+  const before = prog();
   const pause = make('pauze');
   entries.push(pause);
   persist();
+  const { gained } = reward(before);
   syncAlarm();
   if (route().name === 'home' && !draft) render();
-  return showTimer(Date.parse(pause.ts) + C.PAUSE_MINUTES * 60000);
+  return showTimer(Date.parse(pause.ts) + C.PAUSE_MINUTES * 60000, gained);
 }
 
 // Sessie stoppen. Na een stopadvies zonder verder verlies telt dat als pro play: discipline.
@@ -794,7 +926,9 @@ function endSession() {
   closeAlarm();
   if (!st.active) return;
   const now = Date.now();
-  const followed = Boolean(st.redAt) && st.afterAdvice === 0;
+  const before = prog();
+  // Opgevolgd: niet doorgespeeld na het advies, en vandaag nog niet eerder zo afgesloten.
+  const followed = Boolean(st.redAt) && st.afterAdvice === 0 && !st.ignored && !st.leftToday;
   const added = [];
   // De pro play komt vlak voor de stop, zodat hij bij deze sessie hoort.
   if (followed) added.push(make('pro', { kind: 'discipline', note: 'Left the table when the tilt meter was on red.' }, now - 1));
@@ -804,12 +938,18 @@ function endSession() {
     entries = entries.filter((e) => !added.includes(e));
     return;
   }
+  const { gained } = reward(before);
   shown.delete('gauge');
   if (route().name === 'home' && !draft) {
     render(true);
-    if (followed) celebrate(added[0]);
+    if (followed) celebrate(added[0], gained);
+    else popXp(gained);
   }
-  toast(followed ? 'Strong. Session ended and logged as a pro play: Discipline.' : `Session ended after ${C.duration(st.minutes)}.`, {
+  setTimeout(flushCheer, FX.motionOk() ? 900 : 0);
+  let message = `Session ended after ${C.duration(st.minutes)}.`;
+  if (followed) message = `Strong. Session ended and logged as a pro play: Discipline. +${gained} XP`;
+  else if (gained) message = `Session ended after ${C.duration(st.minutes)} · clean exit +${gained} XP`;
+  toast(message, {
     label: 'Undo',
     run: () => {
       entries = entries.filter((e) => !added.includes(e));
@@ -820,6 +960,14 @@ function endSession() {
 }
 
 function ignoreAdvice() {
+  const st = table();
+  const advice = st.active && entries.find((e) => e.type === 'stopadvies' && e.ts === st.redAt);
+  if (advice) {
+    // Vastleggen dat je bewust doorspeelde: dat breekt de streak.
+    advice.ignored = true;
+    advice.updated = Date.now();
+    persist();
+  }
   closeAlarm();
   toast("You're playing on against the stop warning. The meter stays on red.");
 }
@@ -1142,6 +1290,7 @@ const actions = {
   leave: endSession,
   pause: startPause,
   'alarm-close': closeAlarm,
+  'cheer-close': closeCheer,
   mode: (el) => {
     Object.assign(ov, { from: MODES.indexOf(ov.mode), mode: el.dataset.val, offset: 0, bar: null });
     render(true);

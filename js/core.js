@@ -179,7 +179,10 @@ function cleanEntry(raw) {
   if (raw.type === 'klap') return { ...base, type: 'klap', size: raw.size === 'stack' ? 'stack' : 'pot' };
   if (raw.type === 'stop') return { ...base, type: 'stop', advice: raw.advice === true };
   if (raw.type === 'stopadvies') {
-    return typeof raw.cause === 'string' ? { ...base, type: 'stopadvies', cause: raw.cause } : { ...base, type: 'stopadvies' };
+    const advice = { ...base, type: 'stopadvies' };
+    if (typeof raw.cause === 'string') advice.cause = raw.cause;
+    if (raw.ignored === true) advice.ignored = true; // bewust doorgespeeld tegen het advies in
+    return advice;
   }
   if (raw.type === 'start' || raw.type === 'pauze') return { ...base, type: raw.type };
   return null;
@@ -352,6 +355,9 @@ export function tableState(entries, now, settings) {
     pct: advice ? 100 : state.pct,
     redAt: advice ? advice.ts : null,
     afterAdvice: advice ? session.events.filter((e) => at(e) > at(advice) && ['klap', 'punt'].includes(e.type)).length : 0,
+    ignored: Boolean(advice && advice.ignored),
+    // Van tafel gaan op een stopadvies telt één keer per sessiedag, anders valt het te herhalen.
+    leftToday: day.some((e) => e.type === 'stop' && e.advice),
     pauseUntil: pause && at(pause) + PAUSE_MINUTES * 60000 > now ? at(pause) + PAUSE_MINUTES * 60000 : null,
   };
 }
@@ -382,4 +388,115 @@ export function tableStats(entries) {
     }
   }
   return out;
+}
+
+/* ---------- voortgang: XP, combo, streak en levels ---------- */
+
+// Alleen goede mental-game-beslissingen leveren XP op. Een punt levert niets op en breekt de
+// sessiestreak niet: eerlijk loggen mag nooit iets kosten wat je over sessies heen opbouwt.
+export const XP = {
+  pro: 30, // pro play gelogd
+  hit: 10, // een klap gelogd in plaats van erop te stomen
+  break: 40, // pauze genomen toen de meter dat zei
+  leave: 100, // van tafel gegaan op een stopadvies
+  clean: 40, // sessie van minstens een half uur netjes afgesloten
+};
+export const CLEAN_MINUTES = 30;
+export const MAX_MULT = 3;
+
+const TITLES = ['Tilt Monkey', 'Hothead', 'Self-aware', 'Steady', 'Composed', 'Disciplined', 'Ice Cold', 'Zen', 'Unshakeable', 'Stone Buddha'];
+const FLOORS = [0, 150, 400, 750, 1200, 1800, 2500, 3300, 4200, 5200];
+const LEVEL_STEP = 1200; // na level 10 kost elk level evenveel
+
+const floorOf = (level) => (level <= FLOORS.length ? FLOORS[level - 1] : FLOORS[FLOORS.length - 1] + (level - FLOORS.length) * LEVEL_STEP);
+const titleOf = (level) => TITLES[Math.min(level, TITLES.length) - 1];
+
+export const LEVELS = TITLES.map((title, i) => ({ level: i + 1, title, xp: FLOORS[i] }));
+
+export function levelFor(xp) {
+  let level = 1;
+  while (xp >= floorOf(level + 1)) level += 1;
+  const floor = floorOf(level);
+  const next = floorOf(level + 1);
+  return {
+    level,
+    title: titleOf(level),
+    nextTitle: titleOf(level + 1),
+    next,
+    toNext: next - xp,
+    pct: Math.min(99, Math.round(((xp - floor) / (next - floor)) * 100)),
+  };
+}
+
+// De combo: elke winst op rij in een sessie, zonder punt ertussen, verhoogt de vermenigvuldiger.
+export const multFor = (combo) => Math.min(1 + combo * 0.5, MAX_MULT);
+
+// Speelt het hele log af en telt XP, combo en streak. Alles volgt uit de entries zelf,
+// dus bewerken, verwijderen en importeren kloppen vanzelf.
+export function progress(entries, now) {
+  const days = new Map();
+  for (const e of [...entries].sort((a, b) => at(a) - at(b))) {
+    const key = dayKey(sessionDay(e.ts));
+    if (!days.has(key)) days.set(key, []);
+    days.get(key).push(e);
+  }
+  const today = dayKey(sessionDay(now));
+  const events = [];
+  const award = (e, xp, label, mult = 1) => events.push({ id: e.id, ts: e.ts, xp, label, mult });
+  let streak = 0;
+  let bestStreak = 0;
+  let bestCombo = 0;
+  let combo = 0; // van de lopende sessie
+
+  for (const [key, day] of days) {
+    const inSession = new Set();
+    let left = false;
+    const sessions = sessionsOf(day);
+    sessions.forEach((s, i) => {
+      let run = 0;
+      let advice = null;
+      let after = 0;
+      for (const e of s.events) {
+        inSession.add(e.id);
+        if (e.type === 'stopadvies' && !advice) advice = e;
+        if (advice && e !== advice && (e.type === 'klap' || e.type === 'punt')) after += 1;
+        if (e.type === 'punt') {
+          run = 0;
+        } else if (e.type === 'pro' || e.type === 'klap') {
+          const mult = multFor(run);
+          const label = e.type === 'pro' ? `Pro play: ${labelOf(KINDS, e.kind)}` : 'Took a hit and logged it';
+          award(e, Math.round((e.type === 'pro' ? XP.pro : XP.hit) * mult), label, mult);
+          run += 1;
+        } else if (e.type === 'pauze') {
+          award(e, XP.break, 'Took a break on orange');
+          run += 1;
+        }
+        bestCombo = Math.max(bestCombo, run);
+      }
+      const broken = Boolean(advice) && (advice.ignored === true || after > 0);
+      const minutes = s.end ? (Date.parse(s.end) - Date.parse(s.start)) / 60000 : 0;
+      let kept = false;
+      if (s.stop && !broken) {
+        if (s.stop.advice && !left) {
+          left = true;
+          kept = true;
+          award(s.stop, XP.leave, 'Left the table on a stop warning');
+        } else if (!advice && minutes >= CLEAN_MINUTES) {
+          kept = true;
+          award(s.stop, XP.clean, 'Clean exit');
+        }
+      }
+      if (broken) streak = 0;
+      else if (kept) streak += 1;
+      bestStreak = Math.max(bestStreak, streak);
+      if (key === today && i === sessions.length - 1 && !s.end) combo = run;
+    });
+    // Pro plays die je achteraf logt, buiten een sessie, tellen ook: zonder combo.
+    for (const e of day) {
+      if (e.type === 'pro' && !inSession.has(e.id)) award(e, XP.pro, `Pro play: ${labelOf(KINDS, e.kind)}`);
+    }
+  }
+  events.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
+  const xp = events.reduce((sum, ev) => sum + ev.xp, 0);
+  return { xp, ...levelFor(xp), events, wins: events.length, streak, bestStreak, combo, mult: multFor(combo), bestMult: multFor(Math.max(bestCombo - 1, 0)) };
 }
