@@ -226,12 +226,19 @@ function celebrate(entry, gained = 0) {
   if (!amount) return;
   const card = amount.closest('.card');
   if (gained) FX.pulse(view.querySelector('.prog'), 'hit-xp');
+  const meter = view.querySelector('.table'); // tijdens een sessie zijn de weekkaarten klein
   if (entry.type === 'punt') {
     const box = amount.getBoundingClientRect();
-    FX.floatLabel(`+${money(entry.cents)}`, Math.min(box.right + 10, window.innerWidth - 110), box.top + 4, 'punt');
+    FX.floatLabel(`+${money(entry.cents)}`, Math.min(box.right + (meter ? 6 : 10), window.innerWidth - 110), box.top + 4, meter ? 'punt small' : 'punt');
     FX.burst(box.left + box.width / 2, box.bottom - 8, { tone: 'punt', dir: 'down', count: 28, spread: box.width });
     FX.pulse(card, 'hit-punt');
     FX.buzz(40);
+  } else if (entry.type === 'pro' && meter) {
+    const box = meter.querySelector('.gauge').getBoundingClientRect();
+    FX.floatLabel(gained ? `+${gained} XP` : '+1 pro play', box.right - 30, box.top + box.height * 0.3, 'pro');
+    FX.burst(box.left + box.width / 2, box.top + box.height * 0.55, { tone: 'pro', count: 44 });
+    FX.pulse(meter, 'hit-pro');
+    FX.buzz([15, 50, 15]);
   } else if (entry.type === 'pro') {
     const box = card.querySelector('[data-pro]').getBoundingClientRect();
     FX.floatLabel(gained ? `+${gained} XP` : '+1 pro play', Math.min(box.right + 12, window.innerWidth - 130), box.top + 2, 'pro');
@@ -239,7 +246,6 @@ function celebrate(entry, gained = 0) {
     FX.pulse(card, 'hit-pro');
     FX.buzz([15, 50, 15]);
   } else if (entry.type === 'klap') {
-    const meter = view.querySelector('.table');
     if (!meter) return;
     const box = meter.querySelector('.gauge').getBoundingClientRect();
     if (gained) FX.floatLabel(`+${gained} XP`, box.right - 30, box.top + box.height * 0.3, 'klap');

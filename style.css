@@ -1158,6 +1158,7 @@ body[data-zone="rood"] .aura .g { opacity: 0.05; }
 
 .fx-label.pro { --c: var(--green-rgb); transform-origin: 0 100%; }
 .fx-label.klap { --c: var(--violet-rgb); }
+.fx-label.small { font-size: 17px; }
 
 @keyframes float-up {
   0% { opacity: 0; transform: translateY(14px) scale(0.6); }
