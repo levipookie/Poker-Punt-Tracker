@@ -48,9 +48,9 @@ Alles wordt uit je log berekend. Een entry bewerken, verwijderen of importeren p
 
 ## Accounts (Supabase)
 
-Met een account staat je log ook online en blijft het gelijk op al je toestellen. Zonder account werkt de app precies hetzelfde, alleen op dat ene toestel. Inloggen gaat met e-mail en wachtwoord, of met Google. Op iPhone komt inloggen met Google vaak terug in Safari in plaats van in de app op je beginscherm; Safari levert de login dan af bij de app, die hem oppikt zodra je terugschakelt.
+Een account is verplicht: wie de app voor het eerst opent, ziet eerst een welkomstscherm om in te loggen of een account te maken. Je log staat dan ook online en blijft gelijk op al je toestellen. Wie al eens is ingelogd, wordt nooit buitengesloten: verloopt je sessie (bijvoorbeeld zonder bereik aan tafel), dan werkt de app gewoon door en vraagt hij je later opnieuw in te loggen. Inloggen gaat met e-mail en wachtwoord, of met Google. Op iPhone komt inloggen met Google vaak terug in Safari in plaats van in de app op je beginscherm; Safari levert de login dan af bij de app, die hem oppikt zodra je terugschakelt.
 
-De app is local-first: alles wordt eerst op het toestel opgeslagen en op de achtergrond gesynchroniseerd, dus aan tafel zonder bereik werkt alles gewoon. Bij twee wijzigingen van dezelfde entry wint de laatste. Uitloggen haalt het log van dat toestel; het blijft in je account.
+De app is local-first: alles wordt eerst op het toestel opgeslagen en op de achtergrond gesynchroniseerd, dus aan tafel zonder bereik werkt alles gewoon. Bij twee wijzigingen van dezelfde entry wint de laatste. Uitloggen haalt het log van dat toestel; het blijft in je account. Je account verwijderen wist je log overal.
 
 **Eenmalig instellen in Supabase**
 

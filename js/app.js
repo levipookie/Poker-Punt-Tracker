@@ -30,7 +30,7 @@ let pendingFx = null; // entry die net is gelogd en nog gevierd moet worden
 let lastAdded = null; // { id, at } van de laatst gelogde entry, als oorzaak van een stopadvies
 let alarm = null; // het schermvullende advies dat open staat: { kind, rank, until }
 let cheer = null; // nieuw level dat nog gevierd moet worden, zodra er geen advies open staat
-const acc = { mode: 'in', busy: false, error: '', notice: '', confirm: null }; // het accountscherm
+const acc = { mode: 'up', busy: false, error: '', notice: '', confirm: null }; // het accountscherm
 
 /* ---------- opslag ---------- */
 
@@ -200,7 +200,20 @@ function closeForm(fallback = '#/') {
   }
 }
 
+// Zonder account geen app: wie nog nooit is ingelogd op dit toestel, ziet eerst het welkomstscherm.
+// Wie al eens was ingelogd en wiens sessie verliep, kan gewoon door (ook zonder bereik aan tafel).
+const gated = () => Cloud.enabled && !Cloud.ready() && !(Cloud.owner() && !Cloud.user());
+
 function render(animate = false) {
+  if (gated()) {
+    draft = null;
+    document.body.classList.add('is-form');
+    document.body.dataset.tone = '';
+    view.classList.toggle('animate', animate && FX.motionOk());
+    view.innerHTML = accountView(true);
+    afterRender();
+    return;
+  }
   const r = route();
   const full = Boolean(draft) || ['rules', 'progress', 'account'].includes(r.name);
   document.body.classList.toggle('is-form', full);
@@ -400,6 +413,7 @@ function homeView() {
       </button>`;
   return `
     <div class="home${st.active ? ' at-table' : ''}">
+      ${Cloud.enabled && Cloud.owner() && !Cloud.user() ? '<a class="expired" href="#/account" data-nav>Signed out · <b>Sign in again</b> to keep syncing</a>' : ''}
       <header class="top">
         <h1>${ring(week.punts, week.pros)}<span><b>Punt</b> Tracker</span></h1>
         <a class="prog" href="#/progress" data-nav aria-label="Level ${p.level}, ${p.title}. Streak ${p.streak}. Open progress">
@@ -447,6 +461,10 @@ function refreshTable() {
 /* ---------- formulieren ---------- */
 
 function formHead(title) {
+  return headFor(title);
+}
+
+function headFor(title) {
   return `
     <header class="formhead">
       <button type="button" class="back" data-act="close" aria-label="Back">
@@ -714,7 +732,18 @@ function accountBlock() {
     </section>`;
 }
 
-function accountView() {
+const GATE_HEAD = `
+  <header class="gate-hero">
+    <svg class="ring hero-ring" viewBox="0 0 36 36" aria-hidden="true">
+      <circle class="pro" cx="18" cy="18" r="15.9155"/>
+      <circle class="punt" cx="18" cy="18" r="15.9155" stroke-dasharray="46 54"/>
+    </svg>
+    <h1><b>Punt</b> Tracker</h1>
+    <p>Your mental game, <em>on the record.</em></p>
+  </header>`;
+
+function accountView(gate = false) {
+  const formHead = gate ? () => GATE_HEAD : headFor; // op het welkomstscherm geen terugknop
   if (!Cloud.enabled) {
     return `${formHead('Account')}
       <div class="form"><p class="hint lead">Accounts aren't set up for this app yet.</p></div>`;
@@ -751,7 +780,7 @@ function accountView() {
         <p class="hint">Signing out removes your log from this phone. It stays safe in your account.</p>
         <div class="field danger-zone">
           <p class="legend">Delete account</p>
-          <p class="hint">${c === 'delete' ? 'This deletes your account and everything synced to it, for good. The log on this phone stays, only on this phone.' : 'Removes your account and all synced data from the server.'}</p>
+          <p class="hint">${c === 'delete' ? 'This deletes your account and your whole log, on this phone and on the server, for good.' : 'Removes your account and your whole log.'}</p>
           <button type="button" class="btn plain danger" data-act="acc-delete"${acc.busy ? ' disabled' : ''}>${c === 'delete' ? 'Yes, delete my account' : 'Delete account'}</button>
         </div>
       </div>`;
@@ -777,7 +806,7 @@ function accountView() {
         <button type="button" data-act="acc-mode" data-val="in" aria-pressed="${!up}">Sign in</button>
         <button type="button" data-act="acc-mode" data-val="up" aria-pressed="${up}">Create account</button>
       </div>
-      <p class="hint lead">${Cloud.status.expired ? 'Your session expired. Sign in again to keep syncing; nothing on this phone was lost.' : 'With an account your log is backed up and in sync on all your devices. Without one, the app works exactly the same, only on this phone.'}</p>
+      <p class="hint lead">${Cloud.status.expired || Cloud.owner() ? 'Your session expired. Sign in again to keep syncing; nothing on this phone was lost.' : gate ? `${up ? 'Create a free account to start.' : 'Welcome back.'} Your log is backed up and in sync on all your devices, and the app still works at the table without a connection.` : 'Sign in to keep your log backed up and in sync on all your devices.'}</p>
       ${google}
       <div class="field">
         <label class="legend" for="acc-email">Email</label>
@@ -827,7 +856,7 @@ async function submitAccount() {
 function afterSignIn() {
   acc.busy = false;
   if (Cloud.needsClaim(entries.length)) {
-    if (route().name === 'account') return render();
+    if (gated() || route().name === 'account') return render();
     location.hash = '#/account';
     return undefined;
   }
@@ -853,7 +882,8 @@ async function pollGoogle() {
 
 async function claimDevice() {
   Cloud.claim(settings);
-  render();
+  if (route().name !== 'home') location.replace('#/'); // na inloggen altijd op het startscherm
+  render(true);
   await Cloud.sync();
   render();
   toast(Cloud.status.error ? `Signed in. ${Cloud.status.error.message}` : 'Signed in. Your log is synced.');
@@ -878,7 +908,9 @@ async function signOutFlow() {
   settings = { ...C.DEFAULT_SETTINGS };
   saveLocal();
   shown.clear();
-  location.replace('#/log');
+  acc.mode = 'in';
+  location.replace('#/');
+  render(true);
   toast('Signed out. Your log is no longer on this phone.');
 }
 
@@ -897,8 +929,14 @@ async function deleteFlow() {
     return render();
   }
   acc.busy = false;
-  location.replace('#/log');
-  toast('Account deleted. The log on this phone is still here.');
+  entries = [];
+  settings = { ...C.DEFAULT_SETTINGS };
+  saveLocal();
+  shown.clear();
+  acc.mode = 'up';
+  location.replace('#/');
+  render(true);
+  toast('Account deleted, together with your log.');
 }
 
 /* ---------- rondleiding ---------- */
@@ -1160,6 +1198,7 @@ function writeSeen(seen) {
 
 // Kijkt of de meter in een hogere zone is gekomen sinds het laatste advies, en toont dat dan.
 function checkTable() {
+  if (gated()) return;
   const st = table();
   if (!st.active) return;
   const seen = readSeen();
@@ -1871,6 +1910,7 @@ window.addEventListener('online', () => Cloud.sync());
 setInterval(() => {
   if (document.visibilityState === 'visible') Cloud.sync();
 }, 60000);
+if (Cloud.owner()) acc.mode = 'in';
 let wasReady = Cloud.ready();
 Cloud.onStatus(() => {
   for (const el of view.querySelectorAll('[data-sync]')) el.textContent = syncLine();
@@ -1891,7 +1931,7 @@ setInterval(() => {
 onRoute();
 Cloud.sync();
 if (Cloud.takeJustSignedIn()) afterSignIn(); // terug van Google in de app zelf
-else if (!tourSeen() && !entries.length && !Cloud.user() && !Cloud.pendingGoogle()) openTour(); // eerste keer
+else if (!Cloud.enabled && !tourSeen() && !entries.length) openTour(); // zonder accounts: de rondleiding bij de eerste keer
 setInterval(() => {
   if (document.visibilityState === 'visible') pollGoogle();
 }, 2000);

@@ -51,6 +51,8 @@ export const onStatus = (fn) => listeners.push(fn);
 const emit = () => listeners.forEach((fn) => fn());
 
 export const user = () => (session ? session.user : null);
+// Is dit toestel ooit aan een account gekoppeld (ook als de sessie intussen verliep)?
+export const owner = () => state.owner;
 export const lastSync = () => state.lastSync;
 // Klaar om te synchroniseren: ingelogd en de data op dit toestel hoort bij dit account.
 export const ready = () => Boolean(enabled && session && state.owner === session.user.id);
