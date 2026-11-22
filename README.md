@@ -23,13 +23,15 @@ Tilt bouwt zich op zonder dat je het merkt. Daarom telt de app mee in plaats van
 
 - Tik **Start session** als je gaat zitten. Vergeet je dat, dan start de eerste hit of punt de sessie vanzelf.
 - Log elke **Hit** (bad beat of cooler: goed gespeeld, toch verloren) als *Pot lost* of *Stack lost*. Dat zijn twee tikken.
-- Hits, punts en speeltijd tellen op tot een stand van 0 tot 100%. Wat langer geleden is, weegt minder.
+- Hits en punts tellen op tot een stand van 0 tot 100%. Wat langer geleden is, weegt minder.
+- Een punt weegt naar wat hij kostte, vergeleken met je buy-in, en naar de reden: tilt en ego wegen zwaarder dan verveling. Een punt vlak na een klap of punt (doorstomen) telt extra, net als elke volgende punt in korte tijd.
+- Een pauze en een mental-game-pro-play halen de meter wat omlaag. Lang spelen is op zich geen probleem: pas na vier uur zonder pauze loopt de meter langzaam op.
 - **Oranje**: de app zegt dat je 10 minuten van tafel moet en telt de pauze af.
 - **Rood**: stopadvies, met je eigen bericht aan jezelf erbij. Toch doorspelen kan alleen door een knop 2,5 seconde ingedrukt te houden.
-- Direct rood, ongeacht de stand: een punt uit tilt, een tweede punt in één sessie, je stop-loss in stacks, of je maximale sessieduur.
+- Direct rood, ongeacht de stand: een punt van een volle buy-in of meer uit tilt of ego, je stop-loss in stacks, of je maximale sessieduur (staat standaard uit).
 - Ga je van tafel na een stopadvies, dan logt de app dat als pro play (Discipline). In het overzicht zie je wat doorspelen ná een stopadvies je heeft gekost.
 
-De grenzen stel je in onder **Rules** (op de meter): stop-loss, maximale sessieduur, gevoeligheid en je bericht aan jezelf.
+De grenzen stel je in onder **Rules** (op de meter): je buy-in (die bepaalt ook de snelknoppen voor het bedrag van een punt), stop-loss, maximale sessieduur, gevoeligheid en je bericht aan jezelf.
 
 Let op: een web-app kan geen melding sturen als hij dicht is. De meter waarschuwt dus alleen op het moment dat je iets logt of de app opent.
 

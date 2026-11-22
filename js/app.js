@@ -169,7 +169,7 @@ function onRoute() {
       return;
     }
     draft = { ...e, mode: 'edit', when: toLocalInput(e.ts) };
-    if (e.type === 'punt') draft.custom = C.QUICK_AMOUNTS.includes(e.cents) ? '' : plainAmount(e.cents);
+    if (e.type === 'punt') draft.custom = C.quickAmounts(settings.buyIn).includes(e.cents) ? '' : plainAmount(e.cents);
   }
   const fx = r.name === 'home' ? pendingFx : null;
   pendingFx = null;
@@ -493,7 +493,7 @@ function puntForm() {
     <div class="field" id="f-amount">
       <p class="legend">Amount</p>
       <div class="chips four">
-        ${C.QUICK_AMOUNTS.map((c) => chip('pick-amount', c, money(c), !d.custom && d.cents === c, 'punt')).join('')}
+        ${C.quickAmounts(settings.buyIn).map((c) => chip('pick-amount', c, money(c), !d.custom && d.cents === c, 'punt')).join('')}
       </div>
       <label class="money">
         <span>€</span>
@@ -573,19 +573,24 @@ function rulesView() {
     <div class="form">
       <p class="hint lead">Set these rules with a clear head. At the table the meter decides, not how you feel in the moment.</p>
       <div class="field">
+        <p class="legend">Your buy-in</p>
+        <div class="chips five">${C.BUY_INS.map((v) => pick('buyIn', v, money(v))).join('')}</div>
+        <p class="hint">A punt weighs what it cost compared to your buy-in: a €20 punt barely moves the meter at €200 stakes, a full buy-in out of tilt ends your session.</p>
+      </div>
+      <div class="field">
         <p class="legend">Stop-loss</p>
         <div class="chips four">${pick('stopLoss', 2, '2')}${pick('stopLoss', 3, '3')}${pick('stopLoss', 4, '4')}${pick('stopLoss', 0, 'Off')}</div>
         <p class="hint">Lose this many stacks in one session and you stop, however you feel.</p>
       </div>
       <div class="field">
         <p class="legend">Max session length</p>
-        <div class="chips four">${pick('maxHours', 4, '4 h')}${pick('maxHours', 6, '6 h')}${pick('maxHours', 8, '8 h')}${pick('maxHours', 0, 'Off')}</div>
-        <p class="hint">During the last two hours the meter already climbs from fatigue.</p>
+        <div class="chips four">${pick('maxHours', 0, 'Off')}${pick('maxHours', 6, '6 h')}${pick('maxHours', 8, '8 h')}${pick('maxHours', 10, '10 h')}</div>
+        <p class="hint">Off by default: a long session is fine if you're playing well. The meter does climb slowly after 4 hours without a break.</p>
       </div>
       <div class="field">
         <p class="legend">Sensitivity</p>
         <div class="chips three">${pick('sens', 'streng', 'Strict')}${pick('sens', 'normaal', 'Normal')}${pick('sens', 'los', 'Loose')}</div>
-        <p class="hint">Strict and normal: a tilt punt or a second punt in one session is an instant stop. Loose: only at the third punt, and the meter reacts later.</p>
+        <p class="hint">Strict reacts sooner, loose later. On loose a big tilt punt doesn't end your session by itself either.</p>
       </div>
       <div class="field">
         <label class="legend" for="message">Note to self</label>
@@ -595,8 +600,11 @@ function rulesView() {
       <div class="field how">
         <p class="legend">How the meter works</p>
         <ul>
-          <li>Every <b>hit</b> (bad beat or cooler) and every <b>punt</b> adds up. Losing a stack counts more than losing a pot.</li>
-          <li>Points fade slowly: after 2.5 hours a hit weighs half as much.</li>
+          <li>Every <b>hit</b> (bad beat or cooler) adds up. Losing a stack counts more than losing a pot.</li>
+          <li>A <b>punt</b> weighs what it cost compared to your buy-in. Tilt and ego weigh more than boredom or curiosity.</li>
+          <li>A punt right after a beat or another punt counts extra: that's steaming.</li>
+          <li>A <b>break</b> and a mental-win pro play bring the meter down a little.</li>
+          <li>Everything fades: after 2.5 hours a hit weighs half as much. After 4 hours without a break, the meter creeps up.</li>
           <li><b>Orange</b>: 10 minutes away from the table. <b>Red</b>: session over.</li>
           <li>The app can only warn you when you open it or log something. So log every hit right away.</li>
         </ul>
@@ -938,11 +946,11 @@ function tourSlides() {
         </div>
       </div>
       <h2>Tilt builds quietly. <em class="a">The meter sees it.</em></h2>
-      <p>Hits, punts and hours at the table fill the meter. <b>Orange</b> means a 10-minute break. <b>Red</b> means your session is over, before it goes wrong.</p>
+      <p>Bad beats and punts fill the meter, and a big punt out of tilt fills it fast. <b>Orange</b> means a 10-minute break. <b>Red</b> means your session is over, before it goes wrong.</p>
     </section>`,
     `<section class="slide s-xp">
       <div class="art">
-        <div class="chips"><span>+10</span><span>+30</span><span class="big">+100 XP</span></div>
+        <div class="xp-chips"><span>+10</span><span>+30</span><span class="xp-big">+100 XP</span></div>
         <div class="tbar"><i></i></div>
         <p class="lvl">LEVEL UP</p>
         <p class="streak"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.4 2.5c.6 3.1-.9 4.9-2.4 6.6C8.5 10.8 7 12.5 7 15c0 2.9 2.2 5.5 5 5.5s5-2.4 5-5.5c0-1.7-.6-3.2-1.6-4.4-.3 1.2-1 2.1-2 2.6.6-3.6-.1-7.5-1-10.7z"/></svg><span class="n"><i>1</i><i>2</i><i>3</i></span> streak</p>
@@ -952,9 +960,9 @@ function tourSlides() {
     </section>`,
     `<section class="slide s-rules">
       <div class="art">
-        <div class="rule"><span>Stop-loss</span><b>3 stacks</b></div>
-        <div class="rule"><span>Max session</span><b>6 hours</b></div>
-        <div class="rule note"><span>Note to self</span><b>Normally you just fold when you're beat.</b></div>
+        <div class="demo-rule"><span>Stop-loss</span><b>3 stacks</b></div>
+        <div class="demo-rule"><span>Max session</span><b>6 hours</b></div>
+        <div class="demo-rule note"><span>Note to self</span><b>Normally you just fold when you're beat.</b></div>
       </div>
       <h2>Set your rules <em class="v">with a clear head.</em></h2>
       <p>At the table the meter decides, not how you feel in the moment. You can change your rules any time.</p>
@@ -1859,9 +1867,14 @@ window.addEventListener('online', () => Cloud.sync());
 setInterval(() => {
   if (document.visibilityState === 'visible') Cloud.sync();
 }, 60000);
+let wasReady = Cloud.ready();
 Cloud.onStatus(() => {
   for (const el of view.querySelectorAll('[data-sync]')) el.textContent = syncLine();
-  if (route().name === 'account' && !acc.busy) render();
+  const ready = Cloud.ready();
+  const name = route().name;
+  // Ingelogd of uitgelogd geraakt (bv. sessie verlopen): het accountblok opnieuw tekenen.
+  if ((name === 'account' && !acc.busy) || (name === 'log' && ready !== wasReady && !draft)) render();
+  wasReady = ready;
 });
 
 // Tijdens een sessie loopt de klok mee, en kan de maximale duur een advies geven.

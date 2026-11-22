@@ -42,7 +42,6 @@ export const SIZES = [
   ['stack', 'Stack lost'],
 ];
 
-export const QUICK_AMOUNTS = [2000, 5000, 10000, 20000];
 
 // Een sessiedag loopt tot 06:00: alles daarvoor telt bij de vorige kalenderdag.
 export const DAY_START_HOUR = 6;
@@ -240,10 +239,17 @@ export function mergeEntries(current, incoming) {
 // De tafelregels. Je stelt ze in met een helder hoofd; aan tafel beslist de app.
 export const DEFAULT_SETTINGS = {
   stopLoss: 3, // zoveel stacks kwijt in één sessie = stop (0 = uit)
-  maxHours: 6, // maximale sessieduur in uren (0 = uit)
+  maxHours: 0, // harde grens aan de sessieduur in uren (0 = uit; lang spelen is op zich geen probleem)
+  buyIn: 20000, // je gebruikelijke buy-in in centen: daaraan meet de meter hoe zwaar een punt is
   sens: 'normaal', // 'streng' | 'normaal' | 'los'
   message: "You're not playing your own game anymore, even if it doesn't feel that way. Normally you just fold when you're beat. Get up.",
 };
+
+export const BUY_INS = [5000, 10000, 20000, 50000, 100000];
+export const MAX_HOURS = [0, 6, 8, 10];
+const QUICK = { 5000: [500, 1000, 2500, 5000], 10000: [1000, 2500, 5000, 10000], 20000: [2000, 5000, 10000, 20000], 50000: [5000, 10000, 25000, 50000], 100000: [10000, 25000, 50000, 100000] };
+// Snelknoppen voor het bedrag van een punt, passend bij je buy-in.
+export const quickAmounts = (buyIn) => QUICK[buyIn] || QUICK[20000];
 
 // Het standaardbericht van de eerdere Nederlandse versie; wie dat nooit aanpaste krijgt het Engelse.
 const OLD_DEFAULT_MESSAGE = 'Je speelt nu niet meer je eigen spel, ook al voelt het niet zo. Normaal fold je gewoon als je beat bent. Sta op.';
@@ -252,32 +258,72 @@ export function cleanSettings(raw) {
   const s = { ...DEFAULT_SETTINGS };
   if (!raw || typeof raw !== 'object') return s;
   if ([0, 2, 3, 4].includes(raw.stopLoss)) s.stopLoss = raw.stopLoss;
-  if ([0, 4, 6, 8].includes(raw.maxHours)) s.maxHours = raw.maxHours;
+  if ([...MAX_HOURS, 4].includes(raw.maxHours)) s.maxHours = raw.maxHours;
+  if (BUY_INS.includes(raw.buyIn)) s.buyIn = raw.buyIn;
   if (['streng', 'normaal', 'los'].includes(raw.sens)) s.sens = raw.sens;
   if (typeof raw.message === 'string' && raw.message !== OLD_DEFAULT_MESSAGE) s.message = raw.message.slice(0, 400);
   return s;
 }
 
-// Tiltmeter: elke klap en punt geeft punten die langzaam wegzakken (halfwaardetijd 2,5 uur).
-// Vanaf ORANGE adviseert de app een pauze, vanaf RED stoppen. Gevoeligheid schaalt die grenzen.
+/* Tiltmeter.
+ *
+ * Elke gebeurtenis krijgt een gewicht dat langzaam wegzakt (halfwaardetijd 2,5 uur):
+ * - Een klap: een pot kwijt weegt minder dan een stack.
+ * - Een punt: naar wat hij kostte, gemeten aan je buy-in, en naar de reden (tilt en ego
+ *   wegen zwaarder dan verveling). Zwaarder als hij vlak na een klap of punt kwam (doorstomen),
+ *   en elke volgende punt in korte tijd weegt iets meer.
+ * - Een pauze en een mental-game-pro-play halen de meter juist iets omlaag.
+ * Lang spelen is op zich geen probleem: pas na vier uur zonder pauze loopt de meter wat op.
+ * Vanaf ORANGE adviseert de app een pauze, vanaf RED stoppen. Gevoeligheid schaalt die grenzen.
+ */
 export const ORANGE = 50;
 export const RED = 100;
 export const PAUSE_MINUTES = 10;
 const HALF_LIFE_MS = 150 * 60000;
+const STEAM_MS = 45 * 60000; // een punt binnen 45 minuten na een klap of punt: doorstomen
+const REPEAT_MS = 3 * 3600000;
 const SENS = { streng: 0.8, normaal: 1, los: 1.25 };
+const REASON_WEIGHT = { tilt: 1.5, ego: 1.4, fancy: 1.2, moe: 1, verveeld: 1, nieuwsgierig: 0.9, anders: 1 };
+const MENTAL_WINS = ['hero-fold', 'no-fancy', 'reset'];
 const at = (e) => Date.parse(e.ts);
 
-function points(e) {
-  if (e.type === 'klap') return e.size === 'stack' ? 40 : 22;
-  if (e.type === 'punt') return e.reason === 'tilt' ? 55 : e.reason === 'ego' ? 45 : 35;
-  if (e.type === 'pauze') return -15;
-  return 0;
+// Het gewicht van elke gebeurtenis van de dag, in volgorde, met wat ervoor gebeurde als context.
+function weigh(dayEntries, settings) {
+  const buyIn = settings.buyIn || DEFAULT_SETTINGS.buyIn;
+  const out = [];
+  const seen = [];
+  for (const e of dayEntries) {
+    let pts = 0;
+    let steaming = false;
+    if (e.type === 'klap') {
+      pts = e.size === 'stack' ? 38 : 22;
+    } else if (e.type === 'punt') {
+      const size = Math.min(e.cents / buyIn, 2);
+      pts = (10 + 45 * size) * (REASON_WEIGHT[e.reason] || 1);
+      steaming = seen.some((x) => (x.type === 'klap' || x.type === 'punt') && at(e) - at(x) <= STEAM_MS);
+      if (steaming) pts *= 1.25;
+      const before = seen.filter((x) => x.type === 'punt' && at(e) - at(x) <= REPEAT_MS).length;
+      pts *= Math.min(1 + 0.15 * before, 1.6);
+    } else if (e.type === 'pauze') {
+      pts = -15;
+    } else if (e.type === 'pro' && MENTAL_WINS.includes(e.kind)) {
+      pts = -8;
+    }
+    if (pts) out.push({ e, pts, steaming });
+    seen.push(e);
+  }
+  return out;
 }
+
+const decayed = (w, t) => w.pts * 0.5 ** ((t - at(w.e)) / HALF_LIFE_MS);
 
 export function duration(minutes) {
   const h = Math.floor(minutes / 60);
   return h ? `${h}h${String(minutes % 60).padStart(2, '0')}` : `${minutes} min`;
 }
+
+const euro = (cents) => `€${(cents / 100).toLocaleString('en-IE', { maximumFractionDigits: 2 })}`;
+const REASON_TEXT = { tilt: 'out of tilt', ego: 'out of ego', fancy: 'a fancy play', moe: 'while tired', verveeld: 'out of boredom', nieuwsgierig: 'out of curiosity', anders: '' };
 
 // Knipt de entries van één sessiedag (oplopend gesorteerd) in sessies.
 // Een klap start vanzelf een sessie: die log je alleen aan tafel. Een punt doet dat ook,
@@ -307,45 +353,47 @@ export function sessionsOf(sorted) {
 // Stand van de tiltmeter op tijdstip t, voor een sessie binnen de entries van die dag.
 export function evaluate(dayEntries, session, t, settings) {
   const factor = SENS[settings.sens] || 1;
-  let score = 0;
-  for (const e of dayEntries) {
-    if (at(e) <= t) score += points(e) * 0.5 ** ((t - at(e)) / HALF_LIFE_MS);
-  }
-  const minutes = Math.max(0, Math.floor((t - Date.parse(session.start)) / 60000));
-  const hours = minutes / 60;
-  // Vermoeidheid: de laatste twee uur voor de maximale duur telt mee.
-  if (settings.maxHours) score += Math.min(Math.max(0, hours - (settings.maxHours - 2)) * 15, 45);
-  score = Math.max(0, score);
+  const buyIn = settings.buyIn || DEFAULT_SETTINGS.buyIn;
+  const start = Date.parse(session.start);
+  const weights = weigh(dayEntries.filter((e) => at(e) <= t), settings);
+  let score = weights.reduce((sum, w) => sum + decayed(w, t), 0);
 
+  const minutes = Math.max(0, Math.floor((t - start) / 60000));
   const mine = session.events.filter((e) => at(e) <= t);
+  // Vermoeidheid: pas na vier uur zonder pauze, en een pauze zet de klok terug.
+  const lastBreak = mine.filter((e) => e.type === 'pauze').map((e) => at(e) + PAUSE_MINUTES * 60000).pop();
+  const sinceRest = (t - Math.max(start, lastBreak || 0)) / 3600000;
+  const fatigue = Math.min(Math.max(0, sinceRest - 4) * 6, 24);
+  score = Math.max(0, score + fatigue);
+
   const klaps = mine.filter((e) => e.type === 'klap').length;
   const stacks = mine.filter((e) => e.type === 'klap' && e.size === 'stack').length;
-  const punts = mine.filter((e) => e.type === 'punt').length;
-  const tilt = mine.some((e) => e.type === 'punt' && e.reason === 'tilt');
-  const maxPunts = settings.sens === 'los' ? 3 : 2;
+  const punts = mine.filter((e) => e.type === 'punt');
+  const lost = punts.reduce((sum, e) => sum + e.cents, 0);
+  // Eén grote punt uit tilt of ego (een volle buy-in of meer) is genoeg om te stoppen.
+  const blowup = settings.sens === 'los' ? null : punts.find((e) => e.cents >= buyIn && (e.reason === 'tilt' || e.reason === 'ego'));
 
   const stop = [];
-  if (tilt && settings.sens !== 'los') stop.push('You just logged a tilt punt yourself');
-  if (punts >= maxPunts) stop.push(`${punts} punts this session`);
+  if (blowup) stop.push(`${euro(blowup.cents)} punt ${REASON_TEXT[blowup.reason]}`);
   if (settings.stopLoss && stacks >= settings.stopLoss) stop.push(`Stop-loss: ${stacks} stacks lost`);
-  if (settings.maxHours && hours >= settings.maxHours) stop.push(`${duration(minutes)} at the table, your max is ${settings.maxHours} hours`);
+  if (settings.maxHours && minutes / 60 >= settings.maxHours) stop.push(`${duration(minutes)} at the table, your max is ${settings.maxHours} hours`);
 
   const context = [];
   if (klaps) context.push(`${klaps} ${klaps === 1 ? 'hit' : 'hits'}${stacks ? ` (${stacks}× your stack)` : ''}`);
-  if (punts && !stop.some((r) => r.includes('punt'))) context.push(`${punts} ${punts === 1 ? 'punt' : 'punts'}`);
-  if (settings.maxHours && hours >= settings.maxHours - 2 && hours < settings.maxHours) context.push(`${duration(minutes)} at the table already`);
-  // Wat er eerder vandaag gebeurde telt nog mee, ook als dat in een vorige sessie was.
-  let carried = 0;
-  for (const e of dayEntries) {
-    if (at(e) < Date.parse(session.start)) carried += points(e) * 0.5 ** ((t - at(e)) / HALF_LIFE_MS);
+  if (punts.length && !(blowup && punts.length === 1)) {
+    const steamed = weights.some((w) => w.steaming && mine.includes(w.e));
+    context.push(`${punts.length} ${punts.length === 1 ? 'punt' : 'punts'}, ${euro(lost)}${steamed ? ', right after a beat' : ''}`);
   }
+  if (fatigue > 0) context.push(`${duration(Math.round(sinceRest * 60))} without a break`);
+  // Wat er eerder vandaag gebeurde telt nog mee, ook als dat in een vorige sessie was.
+  const carried = weights.filter((w) => at(w.e) < start).reduce((sum, w) => sum + decayed(w, t), 0);
   if (carried >= 20) context.push('still rattled from your previous session');
 
   let zone = 'groen';
-  if (score >= ORANGE * factor || (tilt && settings.sens === 'los')) zone = 'oranje';
+  if (score >= ORANGE * factor) zone = 'oranje';
   if (score >= RED * factor || stop.length) zone = 'rood';
   const pct = zone === 'rood' ? 100 : Math.min(99, Math.round((score / (RED * factor)) * 100));
-  return { score, pct, zone, reasons: [...stop, ...context], klaps, stacks, punts, minutes };
+  return { score, pct, zone, reasons: [...stop, ...context], klaps, stacks, punts: punts.length, minutes };
 }
 
 // De lopende sessie van vandaag (sessiedag), of { active: false }.
