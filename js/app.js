@@ -917,9 +917,9 @@ function tourSlides() {
     </section>`,
     `<section class="slide s-buttons">
       <div class="art">
-        <div class="mini klap"><b>Hit</b><span>Bad beat or cooler</span></div>
-        <div class="mini punt"><b>Punt</b><span>A play you knew was bad</span></div>
-        <div class="mini pro"><b>Pro play</b><span>A great decision</span></div>
+        <div class="demo-btn klap"><b>Hit</b><span>Bad beat or cooler</span></div>
+        <div class="demo-btn punt"><b>Punt</b><span>A play you knew was bad</span></div>
+        <div class="demo-btn pro"><b>Pro play</b><span>A great decision</span></div>
         <i class="finger" aria-hidden="true"></i>
       </div>
       <h2>Three buttons. <em class="v">Two taps.</em></h2>
