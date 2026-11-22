@@ -2,6 +2,9 @@ import * as C from './core.js';
 import * as FX from './fx.js';
 import * as Cloud from './cloud.js';
 
+// Google-login die op de startpagina binnenkwam: eerst naar auth.html, de rest van de app niet starten.
+const STRAY = Cloud.forwardStrayLogin();
+
 const STORE_KEY = 'ppt.v1';
 const SEEN_KEY = 'ppt.seen';
 const TOUR_KEY = 'ppt.tour';
@@ -153,6 +156,7 @@ function route() {
 }
 
 function onRoute() {
+  if (STRAY) return;
   const r = route();
   draft = null;
   if (r.name !== 'account') Object.assign(acc, { confirm: null, error: '', notice: '' });

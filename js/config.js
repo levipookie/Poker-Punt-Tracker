@@ -5,4 +5,4 @@ export const SUPABASE_URL = 'https://xqsvbwewtzvciflqeevw.supabase.co';
 export const SUPABASE_KEY = 'sb_publishable_0DiXbZoysraa1LIImTJX5Q_kztT2WOe';
 
 // Zet op true zodra Google als provider is ingesteld in Supabase (zie de README).
-export const GOOGLE_LOGIN = false;
+export const GOOGLE_LOGIN = true;

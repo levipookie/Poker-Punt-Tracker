@@ -222,7 +222,8 @@ export async function finishGoogle(loc) {
   if (!access || !refreshToken) throw new CloudError('The sign-in did not finish. Go back to the app and try again.', 'oauth', 400);
   const u = await request('/auth/v1/user', { token: access });
   const pending = pendingGoogle();
-  if (pending && pending.id === h) {
+  // Zonder code (Supabase stuurde terug naar de startpagina): wachtte deze browser zelf op Google?
+  if (pending && (pending.id === h || !h)) {
     // Teruggekomen in de app zelf: gewoon inloggen.
     const expiresIn = Number(frag.get('expires_in')) || 3600;
     keep({ access_token: access, refresh_token: refreshToken, expires_at: Number(frag.get('expires_at')) || Math.floor(Date.now() / 1000) + expiresIn, user: u });
@@ -231,8 +232,17 @@ export async function finishGoogle(loc) {
     return { here: true, email: u.email };
   }
   // In een andere browser beland (Safari): de login klaarzetten voor de app.
+  if (h.length !== 64) throw new CloudError('Signed in, but the sign-in could not be passed to the app. Open the app and try again.', 'oauth', 400);
   await request('/rest/v1/rpc/handoff_put', { method: 'POST', body: { handoff: h, token: refreshToken }, token: access });
   return { here: false, email: u.email };
+}
+
+// Kwam de login op de startpagina terecht in plaats van op auth.html? Doorsturen.
+export function forwardStrayLogin() {
+  if (!/(^|[#&])(access_token|error_description)=/.test(location.hash)) return false;
+  const pending = pendingGoogle();
+  location.replace(`auth.html${pending ? `?h=${pending.id}` : ''}${location.hash}`);
+  return true;
 }
 
 // In de app: kijken of Safari de login al heeft klaargezet.
